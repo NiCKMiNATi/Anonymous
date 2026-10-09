@@ -100,6 +100,16 @@ textarea:focus-visible {
   padding: 0.6rem 1rem;
 }
 
+.banner > p {
+  margin: 0 0 0.5rem;
+}
+
+.run-failure ul {
+  margin: 0.4rem 0 0;
+  padding-left: 1.2rem;
+  list-style: disc;
+}
+
 .banner--error,
 .run-failure,
 .composer__error {
@@ -250,6 +260,7 @@ textarea:focus-visible {
 
 .actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 0.5rem;
   margin-top: 0.5rem;
 }

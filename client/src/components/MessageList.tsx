@@ -14,10 +14,24 @@ interface Props {
   detail: ConversationDetailDto;
   pending: PendingSubmission | null;
   onRetry: () => void;
+  /** Reload the saved history, then drop the unconfirmed local copy. Sends nothing. */
   onDiscard: () => void;
+  /** Reload the saved history, then offer the text again as a deliberately new message. */
+  onSendAsNew: () => void;
+  /** True while history is being reloaded to settle an unconfirmed send. */
+  reconciling: boolean;
+  reconcileError: string | null;
 }
 
-export function MessageList({ detail, pending, onRetry, onDiscard }: Props) {
+export function MessageList({
+  detail,
+  pending,
+  onRetry,
+  onDiscard,
+  onSendAsNew,
+  reconciling,
+  reconcileError,
+}: Props) {
   const endRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     endRef.current?.scrollIntoView?.({ block: "end" });
@@ -66,14 +80,33 @@ export function MessageList({ detail, pending, onRetry, onDiscard }: Props) {
             <div className="message__body">{pending.content}</div>
             {pending.status === "unknown" && (
               <div className="run-failure" role="alert">
-                {pending.error ?? "The server could not confirm whether this was saved."} Retrying
-                is safe: the same message is never saved twice.
+                {pending.error ?? "The server could not confirm whether this was saved."} It may
+                or may not be saved. Retrying is safe: the same message is never saved twice.
+                <ul>
+                  <li>
+                    <strong>Retry sending</strong> re-sends this same message.
+                  </li>
+                  <li>
+                    <strong>Discard and reload</strong> reloads the saved history and drops this
+                    unconfirmed copy. Nothing is sent again.
+                  </li>
+                  <li>
+                    <strong>Reload, then send again as a new message</strong> reloads the history,
+                    then puts the text in the message box. Sending it creates a new message, even
+                    if the earlier attempt turns out to be saved.
+                  </li>
+                </ul>
+                {reconciling && <p role="status">Checking the saved history…</p>}
+                {reconcileError && <p>{reconcileError}</p>}
                 <div className="actions">
-                  <button type="button" onClick={onRetry}>
+                  <button type="button" onClick={onRetry} disabled={reconciling}>
                     Retry sending
                   </button>
-                  <button type="button" onClick={onDiscard}>
+                  <button type="button" onClick={onDiscard} disabled={reconciling}>
                     Discard and reload
+                  </button>
+                  <button type="button" onClick={onSendAsNew} disabled={reconciling}>
+                    Reload, then send again as a new message
                   </button>
                 </div>
               </div>

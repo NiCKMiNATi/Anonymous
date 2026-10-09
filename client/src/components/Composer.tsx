@@ -9,9 +9,18 @@ interface Props {
   onSend: (content: string) => void;
   /** Text restored after a refused send so the user does not lose their draft. */
   restoredText: string;
+  /** Shown while the box holds text restored from an unconfirmed send. */
+  restoredNotice?: string | null;
 }
 
-export function Composer({ disabled, disabledReason, error, onSend, restoredText }: Props) {
+export function Composer({
+  disabled,
+  disabledReason,
+  error,
+  onSend,
+  restoredText,
+  restoredNotice,
+}: Props) {
   const [text, setText] = useState(restoredText);
   const canSend = !disabled && text.trim().length > 0;
 
@@ -41,6 +50,7 @@ export function Composer({ disabled, disabledReason, error, onSend, restoredText
           {error}
         </p>
       )}
+      {restoredNotice && <p className="composer__note">{restoredNotice}</p>}
       {disabled && disabledReason && <p className="composer__note">{disabledReason}</p>}
       <label htmlFor="message-input" className="visually-hidden">
         Message

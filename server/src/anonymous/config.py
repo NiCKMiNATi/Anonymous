@@ -8,7 +8,14 @@ from pathlib import Path
 
 LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
 DEFAULT_PORT = 8000
-DEFAULT_DEV_CLIENT_ORIGINS = ("http://127.0.0.1:5173", "http://localhost:5173")
+DEFAULT_DEV_CLIENT_ORIGINS = (
+    "http://127.0.0.1:5173",
+    "http://localhost:5173",
+    "http://[::1]:5173",
+)
+# URL authority forms of the loopback names above. An IPv6 literal is bracketed in a Host header
+# and in an Origin (RFC 3986/6454), unlike the bare ``::1`` accepted by the CLI.
+_LOOPBACK_AUTHORITIES = ("127.0.0.1", "localhost", "[::1]")
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,8 +43,14 @@ class Settings:
 
     def allowed_hosts(self) -> tuple[str, ...]:
         """Host header values (without port) accepted. Loopback names only (DNS-rebinding guard)."""
-        return ("127.0.0.1", "localhost", "[::1]")
+        return _LOOPBACK_AUTHORITIES
 
     def allowed_origins(self) -> frozenset[str]:
-        same_origin = {f"http://127.0.0.1:{self.port}", f"http://localhost:{self.port}"}
+        """Exact origins accepted: this server's own loopback origins plus the dev client origins.
+
+        Same-origin forms mirror ``allowed_hosts`` (including bracketed IPv6) on the configured
+        port, so a page served from any supported loopback address can make its own requests.
+        Nothing is matched by wildcard or prefix.
+        """
+        same_origin = {f"http://{authority}:{self.port}" for authority in _LOOPBACK_AUTHORITIES}
         return frozenset(same_origin | set(self.extra_allowed_origins))

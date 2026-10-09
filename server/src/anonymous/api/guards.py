@@ -13,6 +13,7 @@ These guards only reduce accidental or cross-site exposure of the unauthenticate
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Iterable
 
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
@@ -28,11 +29,14 @@ _SECURITY_HEADERS: tuple[tuple[bytes, bytes], ...] = (
 )
 
 
+# ``host[:port]`` where host is a bracketed IP literal or a name without ``:``/brackets. Anything
+# else (trailing junk after ``]``, a non-numeric port, userinfo) is not a loopback Host.
+_HOST_HEADER = re.compile(r"^(?P<host>\[[0-9A-Fa-f:.]+\]|[^:\[\]@/\s]+)(?::\d{1,5})?$")
+
+
 def _host_without_port(value: str) -> str:
-    if value.startswith("["):
-        end = value.find("]")
-        return value[: end + 1] if end != -1 else value
-    return value.split(":", 1)[0]
+    match = _HOST_HEADER.match(value)
+    return match.group("host") if match else value
 
 
 async def _reject(send: Send, status: int, code: str, message: str) -> None:

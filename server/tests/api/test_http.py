@@ -228,6 +228,81 @@ def test_foreign_origin_is_rejected_and_known_origins_are_allowed(client: TestCl
         assert client.get("/api/v1/health", headers={"Origin": origin}).status_code == 200
 
 
+SAME_ORIGIN_FORMS = ("http://127.0.0.1:{p}", "http://localhost:{p}", "http://[::1]:{p}")
+
+
+def test_every_supported_loopback_form_is_an_accepted_same_origin(client: TestClient) -> None:
+    for form in SAME_ORIGIN_FORMS:
+        response = client.post(
+            "/api/v1/conversations", json={}, headers={"Origin": form.format(p=8000)}
+        )
+        assert response.status_code == 201, form
+
+
+def test_ipv6_loopback_origin_is_accepted_when_served_on_ipv6(db_path: Path) -> None:
+    from anonymous.api.app import create_app
+    from anonymous.config import Settings
+
+    settings = Settings(db_path=db_path, host="::1", port=8765)
+    with TestClient(create_app(settings), base_url="http://[::1]:8765") as c:
+        for form in SAME_ORIGIN_FORMS:
+            ok = c.post("/api/v1/conversations", json={}, headers={"Origin": form.format(p=8765)})
+            assert ok.status_code == 201, form
+        # The configured port is part of the origin: the default port is no longer this server.
+        wrong = c.post("/api/v1/conversations", json={}, headers={"Origin": "http://[::1]:8000"})
+        assert wrong.status_code == 403 and error_code(wrong) == "forbidden_origin"
+
+
+def test_dev_client_origins_include_ipv6_loopback(client: TestClient) -> None:
+    for origin in ("http://127.0.0.1:5173", "http://localhost:5173", "http://[::1]:5173"):
+        assert client.get("/api/v1/health", headers={"Origin": origin}).status_code == 200
+
+
+def test_unrelated_origins_stay_rejected(client: TestClient) -> None:
+    hostile = (
+        "null",
+        "https://evil.example",
+        "http://evil.example:8000",
+        "http://127.0.0.1:9999",  # other port on a loopback name
+        "http://[::1]:9999",
+        "http://[::2]:8000",  # a different IPv6 address
+        "http://[::ffff:127.0.0.1]:8000",  # mapped form is not an accepted spelling
+        "https://127.0.0.1:8000",  # wrong scheme
+        "https://[::1]:8000",
+        "http://::1:8000",  # unbracketed IPv6 is not a valid origin
+        "http://127.0.0.1.evil.example:8000",  # look-alike prefix
+        "http://localhost.evil.example:8000",
+        "http://[::1].evil.example:8000",
+        "http://127.0.0.1:8000/",  # an Origin has no path
+        "http://127.0.0.1:8000, http://evil.example",
+        "",
+    )
+    for origin in hostile:
+        response = client.post("/api/v1/conversations", json={}, headers={"Origin": origin})
+        assert response.status_code == 403 and error_code(response) == "forbidden_origin", origin
+    assert client.get("/api/v1/conversations").json()["conversations"] == []  # nothing created
+
+
+def test_host_header_is_parsed_strictly(client: TestClient) -> None:
+    accepted = ("127.0.0.1", "localhost", "[::1]", "127.0.0.1:8000", "localhost:5173", "[::1]:8000")
+    for host in accepted:
+        assert client.get("/api/v1/health", headers={"Host": host}).status_code == 200, host
+    rejected = (
+        "attacker.example",
+        "[::1].attacker.example:8000",  # not an IPv6 literal followed by a port
+        "[::1]x",
+        "[::2]:8000",
+        "::1",  # unbracketed
+        "127.0.0.1:port",
+        "127.0.0.1:8000@attacker.example",
+        "localhost.attacker.example",
+        "127.0.0.1 attacker.example",
+    )
+    for host in rejected:
+        response = client.get("/api/v1/health", headers={"Host": host})
+        assert response.status_code == 400 and error_code(response) == "invalid_host", host
+
+
 def test_responses_are_uncacheable_and_hardened(client: TestClient) -> None:
     response = client.get("/api/v1/health")
     assert response.headers["cache-control"] == "no-store"
