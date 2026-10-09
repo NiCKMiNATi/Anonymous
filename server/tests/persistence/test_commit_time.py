@@ -1,5 +1,13 @@
 """What the SQLite development adapter guarantees about message commit instants (FR-15/LM-03).
 
+Accepted contract (FR-15, owner wording 2026-10-10): the commit timestamp is sampled within the
+committing transaction after write authority was obtained and before the commit attempt; it is
+authoritative only if the message commits; after an uncertain outcome the original timestamp is
+preserved if it did commit and a later successful operation samples a new one if it did not;
+no equality with, or bound on the difference from, the physical commit instant is promised.
+The tests below prove the implementation behaves that way. The "never earlier / never later"
+statements are implementation facts of this adapter, not part of the contract.
+
 Implementation fact, stated precisely (see docs/implementation/slice-0a.md, "Commit instants"):
 
 * the instant is read from the injected clock *inside* the message's own write transaction, after
@@ -34,6 +42,7 @@ from anonymous.application.context import ContextBuilder
 from anonymous.application.execution import ExecutionCoordinator
 from anonymous.application.ports.model import ModelIdentity, ModelOutput, ModelRequest
 from anonymous.application.ports.persistence import SubmissionOutcome
+from anonymous.domain.errors import StorageOutcomeUnknown
 from anonymous.domain.ids import ConversationId, SubmissionId, UserId, new_uuid
 
 T0 = datetime(2026, 10, 10, 9, 0, 0, tzinfo=UTC)
@@ -293,3 +302,116 @@ class _FixedModel:
 
     def generate(self, request: ModelRequest) -> ModelOutput:
         return ModelOutput("fixed answer", self.identity)
+
+
+class UncertainCommit(RecordingConnection):
+    """Makes the first COMMIT report an error. ``durable`` decides whether it really committed."""
+
+    def __init__(self, inner: object, *, durable: bool, fired: list[str]) -> None:
+        super().__init__(inner, [])
+        self._durable = durable
+        self._fired = fired
+
+    def execute(self, sql: str, *args: object) -> object:
+        if sql.strip().upper() == "COMMIT" and not self._fired:
+            self._fired.append("fired")
+            if self._durable:
+                self._inner.execute(sql, *args)  # type: ignore[attr-defined]
+            raise sqlite3.OperationalError("injected: commit outcome unknown")
+        return self._inner.execute(sql, *args)  # type: ignore[attr-defined]
+
+
+def _inject_uncertain_commit(monkeypatch: pytest.MonkeyPatch, *, durable: bool) -> None:
+    real_connect = connect
+    fired: list[str] = []
+    monkeypatch.setattr(
+        store_module,
+        "connect",
+        lambda path: UncertainCommit(real_connect(path), durable=durable, fired=fired),
+    )
+
+
+def test_uncertain_commit_that_was_durable_keeps_its_original_instant_on_reconciliation(
+    db_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    owner_and_conversation: tuple[UserId, ConversationId],
+) -> None:
+    owner, cid = owner_and_conversation
+    clock = ControlledClock()
+    store = SqliteStore(db_path, clock)
+    submission = SubmissionId(new_uuid())
+
+    def admit_with(sid: SubmissionId) -> SubmissionOutcome:
+        return store.admit_submission(
+            owner=owner,
+            conversation_id=cid,
+            submission_id=sid,
+            content="q",
+            content_sha256=digest("q"),
+        )
+
+    with monkeypatch.context() as patch:
+        _inject_uncertain_commit(patch, durable=True)
+        with pytest.raises(StorageOutcomeUnknown):  # nothing is presented as confirmed
+            admit_with(submission)
+
+    clock.current = T0 + timedelta(hours=1)  # reconciliation happens much later
+    replay = admit_with(submission)
+    assert replay.replayed
+    assert replay.user_message.committed_at == T0  # the originally persisted instant
+    assert len(store.get_history(owner, cid).messages) == 1  # no duplicate
+
+
+def test_uncertain_commit_that_did_not_persist_establishes_nothing_and_a_retry_samples_anew(
+    db_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    owner_and_conversation: tuple[UserId, ConversationId],
+) -> None:
+    owner, cid = owner_and_conversation
+    clock = ControlledClock()
+    store = SqliteStore(db_path, clock)
+    submission = SubmissionId(new_uuid())
+
+    def admit_with(sid: SubmissionId) -> SubmissionOutcome:
+        return store.admit_submission(
+            owner=owner,
+            conversation_id=cid,
+            submission_id=sid,
+            content="q",
+            content_sha256=digest("q"),
+        )
+
+    with monkeypatch.context() as patch:
+        _inject_uncertain_commit(patch, durable=False)
+        with pytest.raises(StorageOutcomeUnknown):
+            admit_with(submission)
+    assert len(store.get_history(owner, cid).messages) == 0  # the sampled instant was not retained
+
+    clock.current = T0 + timedelta(hours=1)
+    retry = admit_with(submission)
+    assert not retry.replayed
+    assert retry.user_message.committed_at == T0 + timedelta(hours=1)  # a new, later sample
+
+
+def test_uncertain_publication_that_was_durable_keeps_the_instant_it_was_sampled_with(
+    db_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    owner_and_conversation: tuple[UserId, ConversationId],
+) -> None:
+    owner, cid = owner_and_conversation
+    clock = ControlledClock()
+    store = SqliteStore(db_path, clock)
+    run = admit(store, owner, cid).run
+    store.record_dispatch(run.id, "m", "r")
+    clock.current = T0 + timedelta(minutes=3)
+
+    with monkeypatch.context() as patch:
+        _inject_uncertain_commit(patch, durable=True)
+        with pytest.raises(StorageOutcomeUnknown):
+            store.publish_response(run.id, "answer")
+
+    clock.current = T0 + timedelta(days=1)  # whenever the state is next read
+    messages = store.get_history(owner, cid).messages
+    assert [m.role.value for m in messages] == ["user", "assistant"]
+    assert messages[1].committed_at == T0 + timedelta(minutes=3)
+    assert messages[0].committed_at == T0

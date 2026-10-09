@@ -82,3 +82,12 @@ Deterministic client tests (no timers except flush): older-snapshot GET leaves t
 **Validation (2026-10-10, macOS):** server `pytest` 106 passed; Codex backend review suite 18 passed; `mypy` clean (50 files); `ruff check` and `ruff format --check` clean. Client `npm test` 49 passed (4 files; 43 → 49 because the R2 group grew from 5 to 11 tests); Codex client review suite 7 passed; `tsc` and `npm run build` pass.
 
 **Limitations:** records of uncertain/abandoned messages are in memory and lost on browser reload; the retransmission-refusal residual above; no real-browser, Windows or iPhone run; commit-gap measurement is one host.
+
+## 12. Addendum — owner-supplied FR-15 wording (2026-10-10, after commit `1eaae70`)
+
+The owner pasted a replacement FR-15 statement. It was treated as the approval the plan was waiting for (D-10 → **superseded**): R7 moves from `OPEN_PENDING_OWNER_DECISION` to *contract accepted; server side implemented and tested; device acceptance pending*.
+
+- **Applied:** FR-15 Statement verbatim (heading text unchanged so existing anchors keep working); consistent clauses in `05-data-model.md` (glossary, §5 sentence, LM-03), `01-domain-model.md` ("Commit time" row), `03-v0-scope.md` (timestamp paragraph) and `04-architecture.md` (FR-15 paragraph). The FR-15 *acceptance criteria* were adapted by the implementer (delayed-commit fixture restated as lock-contention/slow-generation fixtures; uncertain-outcome reconciliation; no physical-instant bound) and are marked as awaiting owner confirmation.
+- **Differences from the earlier proposal (D-10):** the owner's wording does not promise "never earlier than the lock / never later than COMMIT" and explicitly disclaims any bounded difference; those remain implementation facts documented in the notes, not contract. It also uses "commit timestamp" (the term was kept) and does not repeat the display details; they remain in the acceptance criteria and V0 Scope.
+- **Tests added** (`test_commit_time.py`, +3): uncertain-but-durable admission keeps the original instant on same-id reconciliation; uncertain-and-not-durable leaves no message and the retry samples anew; uncertain-but-durable publication keeps its sampled instant. Backend suite 109 passed; review suite 18 passed; mypy, ruff clean. No application code changed.
+- **Not claimed:** full FR-15 acceptance (device display on Windows/macOS/iPhone, owner confirmation of the re-derived acceptance criteria, real-browser check).

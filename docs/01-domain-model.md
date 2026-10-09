@@ -248,7 +248,7 @@ Possible authors include:
 | --- | --- |
 | Message identity | The stable identity of a particular conversational record, independent of its content, position, timestamp, or client. A timestamp does not identify a message; distinct messages may have the same commit time. |
 | Server-authoritative conversation ordering | The message relationships and order established and retained by Anonymous for the conversation. Clients and context construction use this authority; client clocks, display times, and identity alone do not establish it. V0 presents a linear history; this does not fix the future topology or its representation. |
-| Commit time | The authoritative instant when the server commits the message to persistent conversation history. It is retained with the message as an absolute instant independent of client timezone. It does not mean client composition/send time, model generation start/completion, or client receipt/display time. |
+| Commit time | The server's authoritative recording time for a message committed to persistent conversation history, sampled within the committing transaction after it obtained write authority and before its commit attempt (FR-15); not guaranteed equal to the storage engine's physical commit-completion instant. It is retained with the message as an absolute instant independent of client timezone. It does not mean client composition/send time, model generation start/completion, or client receipt/display time. |
 
 Timestamp alone must not define conversation ordering. Equal commit times or non-monotonic timestamps caused by clock adjustments do not change established message order or identity. The mechanism for retaining and enforcing server-authoritative order remains a design decision.
 
