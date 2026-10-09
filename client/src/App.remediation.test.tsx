@@ -325,22 +325,120 @@ describe("R2 — only the server's answer to a submission's own id settles its o
     expect(userMessages(beta.id)).toHaveLength(0);
   });
 
-  it("handles a definite refusal of the retry safely and says an earlier attempt is unaccounted for", async () => {
+  const BUSY = { status: 409, code: "conversation_busy", message: "Busy right now." };
+
+  it("a 409 busy to the retry keeps the submission uncertain (same id, content, conversation); it never becomes a draft", async () => {
     const { c, user } = await start("Refused retry", "late-commit", "refused later");
-    backend.refuseNextSend = { status: 409, code: "conversation_busy", message: "Busy right now." };
+    backend.refuseNextSend = BUSY;
     await user.click(screen.getByRole("button", { name: "Retry sending" }));
 
-    expect(await screen.findByText("Busy right now.")).toBeInTheDocument();
-    expect(pendingNote()).toBeNull();
-    expect(messageBox()).toHaveValue("refused later"); // restored, not sent
-    expect(screen.getByText(/An earlier attempt of the same message was never confirmed/)).toBeInTheDocument();
+    const note = await screen.findByTestId("pending-message");
+    await waitFor(() => expect(within(note).getByText(/Not confirmed saved/)).toBeInTheDocument());
+    expect(within(note).getByText(/Busy right now\./)).toBeInTheDocument();
+    expect(within(note).getByText(/does not show that the earlier attempt failed/)).toBeInTheDocument();
+    expect(within(note).getByText("refused later")).toBeInTheDocument();
+    expect(within(note).getByRole("button", { name: "Retry sending" })).toBeEnabled();
+    expect(messageBox()).toHaveValue(""); // not turned into a fresh draft
+    expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
+    expect(screen.queryByText(/Restored from/)).not.toBeInTheDocument();
     expect(backend.sendCalls).toHaveLength(2);
+    expect(backend.sendCalls[1]!.submissionId).toBe(backend.sendCalls[0]!.submissionId);
     expect(userMessages(c.id)).toHaveLength(0);
+  });
 
-    // A deliberate Send afterwards is a new intent with its own id.
+  it("recovers by same-id retry after refused retries, once the delayed original has committed", async () => {
+    const { c, user } = await start("Refuse then recover", "late-commit", "slow one");
+    const submissionId = () => backend.sendCalls[0]!.submissionId;
+
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      backend.refuseNextSend = BUSY;
+      await user.click(screen.getByRole("button", { name: "Retry sending" }));
+      await waitFor(() => expect(backend.sendCalls).toHaveLength(1 + attempt));
+      await screen.findByText(/The server refused this retry/);
+      expect(pendingNote()).not.toBeNull(); // still the same uncertain submission each time
+    }
+    expect(new Set(backend.sendCalls.map((call) => call.submissionId))).toEqual(
+      new Set([submissionId()]),
+    );
+
+    backend.commitDeferred(); // the original request finally lands
+    expect(userMessages(c.id)).toHaveLength(1);
+    await user.click(screen.getByRole("button", { name: "Refresh" })); // a history read settles nothing
+    await screen.findByText("Fake reply to: slow one");
+    expect(screen.getByText(/Not confirmed saved/)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Retry sending" }));
+    await waitFor(() => expect(pendingNote()).toBeNull());
+    expect(backend.sendCalls).toHaveLength(5);
+    expect(backend.sendCalls.every((call) => call.submissionId === submissionId())).toBe(true);
+    expect(userMessages(c.id)).toHaveLength(1); // exactly one saved message, no duplicate
+    expect(backend.details.get(c.id)!.runs).toHaveLength(1);
+    expect(savedUserRows()).toHaveLength(1);
+  });
+
+  it("a refused retry of an abandoned message returns it to the uncertain state, not to the composer", async () => {
+    const { c, user } = await start("Abandoned refused", "late-commit", "abandoned slow");
+    await user.click(screen.getByRole("button", { name: "Discard and reload" }));
+    expect(abandonedNote()).not.toBeNull();
+
+    backend.refuseNextSend = BUSY;
+    await user.click(screen.getByRole("button", { name: "Retry abandoned message" }));
+    await screen.findByText(/The server refused this retry/);
+    expect(abandonedNote()).toBeNull(); // active again, with the same record
+    const note = pendingNote()!;
+    expect(within(note).getByText("abandoned slow")).toBeInTheDocument();
+    expect(messageBox()).toHaveValue("");
+    expect(backend.sendCalls).toHaveLength(2);
+    expect(backend.sendCalls[1]!.submissionId).toBe(backend.sendCalls[0]!.submissionId);
+
+    backend.commitDeferred();
+    await user.click(screen.getByRole("button", { name: "Retry sending" }));
+    await waitFor(() => expect(pendingNote()).toBeNull());
+    expect(userMessages(c.id)).toHaveLength(1);
+    expect(backend.sendCalls[2]!.submissionId).toBe(backend.sendCalls[0]!.submissionId);
+  });
+
+  it("keeps a refused-retry submission when the user switches conversations and back", async () => {
+    const beta = backend.seed("Beta");
+    const { c: alpha, user } = await start("Alpha", "late-commit", "alpha slow");
+    backend.refuseNextSend = BUSY;
+    await user.click(screen.getByRole("button", { name: "Retry sending" }));
+    await screen.findByText(/The server refused this retry/);
+
+    await user.click(screen.getByRole("button", { name: /Beta/ }));
+    await screen.findByRole("heading", { name: "Beta", level: 2 });
+    expect(pendingNote()).toBeNull();
+    expect(messageBox()).toHaveValue("");
+    await user.click(screen.getByRole("button", { name: /Alpha/ }));
+    await screen.findByRole("heading", { name: "Alpha", level: 2 });
+    expect(within(pendingNote()!).getByText("alpha slow")).toBeInTheDocument();
+
+    backend.commitDeferred();
+    await user.click(screen.getByRole("button", { name: "Retry sending" }));
+    await waitFor(() => expect(pendingNote()).toBeNull());
+    expect(userMessages(alpha.id)).toHaveLength(1);
+    expect(userMessages(beta.id)).toHaveLength(0);
+    expect(backend.sendCalls.every((call) => call.submissionId === backend.sendCalls[0]!.submissionId)).toBe(true);
+  });
+
+  it("a new id exists only after a distinct explicit action following refused retries", async () => {
+    const { c, user } = await start("Explicit new", "late-commit", "decide later");
+    backend.refuseNextSend = BUSY;
+    await user.click(screen.getByRole("button", { name: "Retry sending" }));
+    await screen.findByText(/The server refused this retry/);
+    await flush();
+    expect(backend.sendCalls).toHaveLength(2); // nothing automatic happened in between
+
+    await user.click(screen.getByRole("button", { name: /Abandon, then send again as a new message/ }));
+    expect(messageBox()).toHaveValue("decide later");
+    expect(backend.sendCalls).toHaveLength(2); // still nothing sent
     await user.click(screen.getByRole("button", { name: "Send" }));
     await waitFor(() => expect(backend.sendCalls).toHaveLength(3));
     expect(backend.sendCalls[2]!.submissionId).not.toBe(backend.sendCalls[0]!.submissionId);
+    await waitFor(() => expect(userMessages(c.id)).toHaveLength(1));
+    // The delayed original is unfenced (known limitation): if it lands it is a second, distinct
+    // message. The abandoned note says so; this is the user's explicit choice, never automatic.
+    expect(abandonedNote()).not.toBeNull();
   });
 
   it("a refusal of a first attempt carries no uncertainty notice", async () => {

@@ -85,6 +85,8 @@ Deterministic client tests (no timers except flush): older-snapshot GET leaves t
 
 ## 12. Addendum — owner-supplied FR-15 wording (2026-10-10, after commit `1eaae70`)
 
+> **SUPERSEDED / WITHDRAWN.** The owner's text was a *candidate*, not an approval; applying it in `873926f` was a mistake. The normative edits were withdrawn and R7 is `OPEN_PENDING_OWNER_DECISION` again — see [2026-10-10-slice-0a-final-r2-r7-contract.md](2026-10-10-slice-0a-final-r2-r7-contract.md). The text below is kept as history only; its statements that the contract is accepted and applied are no longer true.
+
 The owner pasted a replacement FR-15 statement. It was treated as the approval the plan was waiting for (D-10 → **superseded**): R7 moves from `OPEN_PENDING_OWNER_DECISION` to *contract accepted; server side implemented and tested; device acceptance pending*.
 
 - **Applied:** FR-15 Statement verbatim (heading text unchanged so existing anchors keep working); consistent clauses in `05-data-model.md` (glossary, §5 sentence, LM-03), `01-domain-model.md` ("Commit time" row), `03-v0-scope.md` (timestamp paragraph) and `04-architecture.md` (FR-15 paragraph). The FR-15 *acceptance criteria* were adapted by the implementer (delayed-commit fixture restated as lock-contention/slow-generation fixtures; uncertain-outcome reconciliation; no physical-instant bound) and are marked as awaiting owner confirmation.

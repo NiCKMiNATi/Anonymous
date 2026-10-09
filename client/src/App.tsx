@@ -29,8 +29,6 @@ interface Draft {
 const ABANDONED_REWRITE_NOTICE =
   "Restored from a message you abandoned before the server confirmed it. If that message is shown above, clear this box; sending this text saves a new message.";
 
-const REFUSED_AFTER_UNCERTAINTY_NOTICE =
-  "The server refused this retry, so this attempt saved nothing. An earlier attempt of the same message was never confirmed: check the history before sending this text again.";
 
 function asApiError(error: unknown): ApiError {
   return error instanceof ApiError
@@ -153,7 +151,10 @@ export function App() {
     }
   };
 
-  // `afterUncertainty`: an earlier transmission of this same submission was never confirmed.
+  // `afterUncertainty`: an earlier transmission of this same submission was never confirmed, so
+  // this is a retransmission. A retransmission that is refused (e.g. 409 busy) says nothing about
+  // the earlier transmission, which may still arrive and commit; the submission therefore stays
+  // uncertain, with its id, conversation and content, and never becomes an ordinary draft.
   const submit = async (
     conversationId: string,
     submissionId: string,
@@ -168,26 +169,28 @@ export function App() {
       await loadDetail(conversationId, { quiet: true }); // the server's history is authoritative
     } catch (error) {
       const apiError = noteResult(error);
-      if (apiError.unknownOutcome) {
+      if (apiError.unknownOutcome || afterUncertainty) {
         setPending({
           conversationId,
           submissionId,
           content,
           status: "unknown",
-          error: apiError.message,
+          error: apiError.unknownOutcome
+            ? apiError.message
+            : `The server refused this retry: ${apiError.message} That does not show that the earlier attempt failed.`,
         });
         return;
       }
-      // A definite refusal (busy, invalid, not found): this attempt saved nothing; keep the draft
-      // for the conversation it was written in. If an earlier transmission was never confirmed,
-      // say so: only the server's answer to this id settles it, and a refusal is not that.
+      // A definite refusal of a first and only transmission (busy, invalid, not found): nothing
+      // was saved and nothing else is outstanding; keep the draft for the conversation it was
+      // written in.
       setPending(null);
       setSendError({ conversationId, message: apiError.message });
       setDraft((current) => ({
         key: current.key + 1,
         text: content,
         conversationId,
-        notice: afterUncertainty ? REFUSED_AFTER_UNCERTAINTY_NOTICE : null,
+        notice: null,
       }));
       await loadDetail(conversationId, { quiet: true });
     }
@@ -225,6 +228,8 @@ export function App() {
     void loadDetail(record.conversationId, { quiet: true });
   };
 
+  // The record moves from the abandoned list into the active `pending` slot in the same step, so
+  // its id and content are never held by nothing; whatever the retry's outcome, `submit` keeps it.
   const retryAbandoned = (submissionId: string) => {
     const record = abandoned.find((item) => item.submissionId === submissionId);
     if (!record || pending !== null) return;

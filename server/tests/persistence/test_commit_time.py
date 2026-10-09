@@ -1,23 +1,22 @@
-"""What the SQLite development adapter guarantees about message commit instants (FR-15/LM-03).
+"""What the SQLite development adapter does with message commit instants (FR-15/LM-03 candidate).
 
-Accepted contract (FR-15, owner wording 2026-10-10): the commit timestamp is sampled within the
-committing transaction after write authority was obtained and before the commit attempt; it is
-authoritative only if the message commits; after an uncertain outcome the original timestamp is
-preserved if it did commit and a later successful operation samples a new one if it did not;
-no equality with, or bound on the difference from, the physical commit instant is promised.
-The tests below prove the implementation behaves that way. The "never earlier / never later"
-statements are implementation facts of this adapter, not part of the contract.
+Candidate contract (owner-supplied FR-15 wording; NOT yet approved, normative documents unchanged):
+the commit timestamp is sampled within the committing transaction after write authority was
+obtained and before the commit attempt; it is authoritative only if the message commits; after an
+uncertain outcome nothing is assumed (no rollback is inferred) and reconciliation determines
+whether the operation committed -- if so the originally persisted timestamp is preserved, if not a
+later successful operation samples its own; no equality with, or numeric bound on the difference
+from, the physical commit-completion instant is promised; order never depends on timestamps.
 
-Implementation fact, stated precisely (see docs/implementation/slice-0a.md, "Commit instants"):
+Stated in terms of the order of *events*, not of wall-clock values (a wall clock can step
+backwards, so no numeric inequality between a stored instant and any other reading is promised):
 
-* the instant is read from the injected clock *inside* the message's own write transaction, after
-  ``BEGIN IMMEDIATE`` has acquired the exclusive write lock and after admission checks, immediately
-  before the INSERT statements, and in the same atomic transaction that makes the message durable;
-* it is therefore never earlier than lock acquisition, never later than the durable COMMIT, and no
-  other writer can commit between the sample and the COMMIT;
-* the row has to carry the value before COMMIT runs, so the engine's own COMMIT instant is not
-  observable by the application and the stored value is *at or before* it, by the duration of the
-  remaining statements and the durable flush. These tests do not claim equality with that instant.
+* the clock is read inside the message's own write transaction, after ``BEGIN IMMEDIATE`` has
+  acquired the exclusive write lock and the admission checks, before the INSERT statements and
+  before ``COMMIT`` is issued, in the same atomic transaction that makes the message durable;
+* no other writer can commit between that read and this transaction's commit attempt;
+* the row must carry the value before ``COMMIT`` runs, so the engine's own commit-completion
+  instant is not observable by the application and equality with it is neither provided nor tested.
 
 Equal or non-monotonic instants never decide order (covered in ``test_store_behavior.py`` and
 ``test_execution.py``); ordering is the integer position.
@@ -243,17 +242,17 @@ def test_each_write_transaction_samples_the_clock_once_inside_itself(
         )
 
 
-def test_instant_is_never_later_than_the_commit_it_belongs_to(
+def test_instant_is_read_before_the_commit_attempt_not_at_commit(
     db_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     owner_and_conversation: tuple[UserId, ConversationId],
 ) -> None:
-    """The upper bound: the stored instant is at or before the moment COMMIT was issued.
+    """The value stored is the one read before the commit attempt, even if time passes after.
 
-    Deliberately an inequality. The injected 90 s delay is a synthetic probe of "never later than
-    COMMIT"; it is NOT evidence of exact correspondence with the physical commit instant. The
-    remaining gap (statements + durable flush) is not asserted to be zero because the engine's
-    COMMIT instant cannot be stored in the committing row.
+    The test clock is advanced by 90 s when COMMIT is issued. This only demonstrates *which*
+    reading is stored (the earlier one, taken before the commit attempt) with a controlled clock.
+    It is NOT evidence of correspondence with the physical commit-completion instant, and no
+    inequality between wall-clock readings is promised for a real, steppable clock.
     """
     owner, cid = owner_and_conversation
     clock = ControlledClock()
@@ -272,7 +271,7 @@ def test_instant_is_never_later_than_the_commit_it_belongs_to(
     outcome = admit(store, owner, cid)
 
     assert commit_clock_values
-    assert outcome.user_message.committed_at <= commit_clock_values[0]
+    assert outcome.user_message.committed_at != commit_clock_values[0]
     assert outcome.user_message.committed_at == T0  # taken before the delay, as documented
 
 
