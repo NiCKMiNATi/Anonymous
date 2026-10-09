@@ -21,11 +21,18 @@ export class FakeBackend {
   failGeneration = false;
   /** Next send commits on the server but the response is lost on the way back. */
   loseNextAcknowledgment = false;
+  /**
+   * Next send is lost on the way to the server: the client sees a network error, but the request
+   * is still in flight and commits only when `commitDeferred()` is called (a slow or delayed
+   * delivery). A history read before that moment is an older snapshot that omits the message.
+   */
+  deferNextCommit = false;
   /** Next send is refused with this error. */
   refuseNextSend: { status: number; code: string; message: string } | null = null;
   /** Hold sends until released, to observe the in-progress state. */
   holdSends: Promise<void> | null = null;
 
+  private deferred: (() => void) | null = null;
   private counter = 0;
   private tick = 0;
 
@@ -113,12 +120,41 @@ export class FakeBackend {
     const existing = this.submissions.get(body.submission_id);
     if (existing) return this.json(200, { ...existing, replayed: true });
 
+    if (this.deferNextCommit) {
+      this.deferNextCommit = false;
+      this.deferred = () => {
+        // Idempotent by submission id, like the real server.
+        if (!this.submissions.has(body.submission_id)) this.commit(detail, body);
+      };
+      throw new TypeError("Failed to fetch");
+    }
+
     if (this.refuseNextSend) {
       const refusal = this.refuseNextSend;
       this.refuseNextSend = null;
       return this.error(refusal.status, refusal.code, refusal.message);
     }
 
+    const result = this.commit(detail, body);
+
+    if (this.loseNextAcknowledgment) {
+      this.loseNextAcknowledgment = false;
+      throw new TypeError("Failed to fetch");
+    }
+    return this.json(201, result);
+  }
+
+  /** Performs the delayed delivery of a request lost earlier (see `deferNextCommit`). */
+  commitDeferred(): void {
+    const run = this.deferred;
+    this.deferred = null;
+    run?.();
+  }
+
+  private commit(
+    detail: { messages: MessageDto[]; runs: RunDto[] },
+    body: { submission_id: string; content: string },
+  ): SubmissionResultDto {
     const user: MessageDto = {
       id: this.nextId("msg"),
       position: detail.messages.length + 1,
@@ -162,11 +198,6 @@ export class FakeBackend {
       assistant_message: assistant,
     };
     this.submissions.set(body.submission_id, result);
-
-    if (this.loseNextAcknowledgment) {
-      this.loseNextAcknowledgment = false;
-      throw new TypeError("Failed to fetch");
-    }
-    return this.json(201, result);
+    return result;
   }
 }

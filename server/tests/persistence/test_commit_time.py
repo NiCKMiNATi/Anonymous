@@ -241,8 +241,10 @@ def test_instant_is_never_later_than_the_commit_it_belongs_to(
 ) -> None:
     """The upper bound: the stored instant is at or before the moment COMMIT was issued.
 
-    Deliberately an inequality. The remaining gap (statements + durable flush) is not asserted
-    to be zero because the engine's COMMIT instant cannot be stored in the committing row.
+    Deliberately an inequality. The injected 90 s delay is a synthetic probe of "never later than
+    COMMIT"; it is NOT evidence of exact correspondence with the physical commit instant. The
+    remaining gap (statements + durable flush) is not asserted to be zero because the engine's
+    COMMIT instant cannot be stored in the committing row.
     """
     owner, cid = owner_and_conversation
     clock = ControlledClock()

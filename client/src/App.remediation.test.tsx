@@ -220,86 +220,215 @@ describe("R1 — stale responses never replace the current selection", () => {
   });
 });
 
-describe("R2 — discarding an unconfirmed send never creates a hidden fresh send", () => {
-  async function loseFirstAcknowledgment(content = "one intent") {
-    const c = backend.seed("Lossy");
+describe("R2 — only the server's answer to a submission's own id settles its outcome", () => {
+  const pendingNote = () => screen.queryByTestId("pending-message");
+  const abandonedNote = () => screen.queryByTestId("abandoned-message");
+  const userMessages = (id: string) =>
+    backend.details.get(id)!.messages.filter((m) => m.role === "user");
+  const savedUserRows = () => document.querySelectorAll(".message--user:not(.message--pending)");
+
+  async function start(title: string, mode: "lost-ack" | "late-commit", content = "one intent") {
+    const c = backend.seed(title);
     window.location.hash = `#/c/${c.id}`;
-    backend.loseNextAcknowledgment = true;
+    if (mode === "lost-ack") backend.loseNextAcknowledgment = true;
+    else backend.deferNextCommit = true;
     const user = userEvent.setup();
     render(<App />);
     await user.type(await screen.findByLabelText("Message"), `${content}{Enter}`);
     await screen.findByText("Not confirmed saved");
     return { c, user };
   }
-  const userMessages = (id: string) =>
-    backend.details.get(id)!.messages.filter((m) => m.role === "user");
 
-  it("reconciles against saved history, leaves the composer empty and sends nothing", async () => {
-    const { c, user } = await loseFirstAcknowledgment();
+  it("keeps the submission unresolved across an older history snapshot, a late commit and later reads, then settles by same-id retry", async () => {
+    const { c, user } = await start("Late", "late-commit", "late one");
+    const refresh = () => user.click(screen.getByRole("button", { name: "Refresh" }));
+
+    // History read #1: an older snapshot that does not contain the message.
+    await refresh();
+    await flush();
+    expect(savedUserRows()).toHaveLength(0);
+    expect(screen.getByText("Not confirmed saved")).toBeInTheDocument(); // absence proved nothing
+    expect(screen.getByRole("button", { name: "Retry sending" })).toBeEnabled();
+
+    // The original request now lands. The client has not been told anything.
+    backend.commitDeferred();
+    expect(userMessages(c.id)).toHaveLength(1);
+
+    // History read #2 shows the message, yet the submission is still not settled by it.
+    await refresh();
+    await screen.findByText("Fake reply to: late one");
+    expect(savedUserRows()).toHaveLength(1);
+    expect(screen.getByText("Not confirmed saved")).toBeInTheDocument(); // presence proved nothing
+    expect(backend.sendCalls).toHaveLength(1); // and nothing was sent on its behalf
+
+    // Only the server's answer to the same id settles it, with no duplicate.
+    await user.click(screen.getByRole("button", { name: "Retry sending" }));
+    await waitFor(() => expect(pendingNote()).toBeNull());
+    expect(backend.sendCalls).toHaveLength(2);
+    expect(backend.sendCalls[1]!.submissionId).toBe(backend.sendCalls[0]!.submissionId);
+    expect(userMessages(c.id)).toHaveLength(1);
+    expect(backend.details.get(c.id)!.runs).toHaveLength(1);
+    expect(savedUserRows()).toHaveLength(1);
+  });
+
+  it("settles by same-id retry when the original had not committed yet, and a late original then adds nothing", async () => {
+    const { c, user } = await start("Early retry", "late-commit", "early retry");
+    await user.click(screen.getByRole("button", { name: "Retry sending" }));
+    await screen.findByText("Fake reply to: early retry");
+    expect(pendingNote()).toBeNull();
+    backend.commitDeferred(); // the original finally arrives: same id, so the server ignores it
+    expect(userMessages(c.id)).toHaveLength(1);
+    expect(backend.sendCalls[1]!.submissionId).toBe(backend.sendCalls[0]!.submissionId);
+  });
+
+  it("makes no automatic request while a submission is uncertain", async () => {
+    const { user } = await start("Quiet", "late-commit");
+    let gets = 0;
+    const inner = backend.fetch;
+    vi.stubGlobal("fetch", (input: RequestInfo | URL, init?: RequestInit) => {
+      if (!init?.method) gets += 1;
+      return inner(input, init);
+    });
+    await flush();
+    await flush();
+    expect(gets).toBe(0);
+    expect(backend.sendCalls).toHaveLength(1);
+    await user.click(screen.getByRole("button", { name: "Refresh" })); // user-initiated only
+    await flush();
+    expect(gets).toBeGreaterThan(0);
+    expect(backend.sendCalls).toHaveLength(1);
+    expect(pendingNote()).not.toBeNull();
+  });
+
+  it("keeps the uncertainty, and its id, when the user switches conversations and back", async () => {
+    const beta = backend.seed("Beta");
+    const { c: alpha, user } = await start("Alpha", "late-commit", "alpha intent");
+    await user.click(screen.getByRole("button", { name: /Beta/ }));
+    await screen.findByRole("heading", { name: "Beta", level: 2 });
+    expect(pendingNote()).toBeNull(); // shown only where it belongs
+    expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
+    expect(screen.getByText(/in another conversation is still being sent or is unconfirmed/)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /Alpha/ }));
+    await screen.findByRole("heading", { name: "Alpha", level: 2 });
+    expect(pendingNote()).not.toBeNull();
+    expect(within(pendingNote()!).getByText("alpha intent")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Retry sending" }));
+    await waitFor(() => expect(pendingNote()).toBeNull());
+    expect(backend.sendCalls.map((call) => call.submissionId)).toEqual([
+      backend.sendCalls[0]!.submissionId,
+      backend.sendCalls[0]!.submissionId,
+    ]);
+    expect(backend.sendCalls.every((call) => call.conversationId === alpha.id)).toBe(true);
+    expect(userMessages(alpha.id)).toHaveLength(1);
+    expect(userMessages(beta.id)).toHaveLength(0);
+  });
+
+  it("handles a definite refusal of the retry safely and says an earlier attempt is unaccounted for", async () => {
+    const { c, user } = await start("Refused retry", "late-commit", "refused later");
+    backend.refuseNextSend = { status: 409, code: "conversation_busy", message: "Busy right now." };
+    await user.click(screen.getByRole("button", { name: "Retry sending" }));
+
+    expect(await screen.findByText("Busy right now.")).toBeInTheDocument();
+    expect(pendingNote()).toBeNull();
+    expect(messageBox()).toHaveValue("refused later"); // restored, not sent
+    expect(screen.getByText(/An earlier attempt of the same message was never confirmed/)).toBeInTheDocument();
+    expect(backend.sendCalls).toHaveLength(2);
+    expect(userMessages(c.id)).toHaveLength(0);
+
+    // A deliberate Send afterwards is a new intent with its own id.
+    await user.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(backend.sendCalls).toHaveLength(3));
+    expect(backend.sendCalls[2]!.submissionId).not.toBe(backend.sendCalls[0]!.submissionId);
+  });
+
+  it("a refusal of a first attempt carries no uncertainty notice", async () => {
+    const c = backend.seed("Plain refusal");
+    window.location.hash = `#/c/${c.id}`;
+    backend.refuseNextSend = { status: 409, code: "conversation_busy", message: "Busy right now." };
+    const user = userEvent.setup();
+    render(<App />);
+    await user.type(await screen.findByLabelText("Message"), "plain{Enter}");
+    expect(await screen.findByText("Busy right now.")).toBeInTheDocument();
+    expect(messageBox()).toHaveValue("plain");
+    expect(screen.queryByText(/never confirmed/)).not.toBeInTheDocument();
+  });
+
+  it("explicit discard sends nothing, restores nothing and is shown as abandoned, not failed", async () => {
+    const { c, user } = await start("Abandon", "lost-ack");
     await user.click(screen.getByRole("button", { name: "Discard and reload" }));
-    await screen.findByText("Fake reply to: one intent");
+    await screen.findByText("Fake reply to: one intent"); // the view was refreshed
 
-    expect(screen.queryByTestId("pending-message")).not.toBeInTheDocument();
+    expect(pendingNote()).toBeNull();
+    const note = abandonedNote()!;
+    expect(within(note).getByText("Abandoned — outcome unknown")).toBeInTheDocument();
+    expect(note).toHaveTextContent(/not confirmed failed/i);
+    expect(screen.queryByText(/Response failed/)).not.toBeInTheDocument();
     expect(messageBox()).toHaveValue("");
     expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
     await flush();
     expect(backend.sendCalls).toHaveLength(1);
     expect(userMessages(c.id)).toHaveLength(1);
+    expect(screen.queryByRole("button", { name: "Retry sending" })).not.toBeInTheDocument();
+
+    // Forgetting only removes the note.
+    await user.click(screen.getByRole("button", { name: "Forget abandoned message" }));
+    expect(abandonedNote()).toBeNull();
+    await flush();
+    expect(backend.sendCalls).toHaveLength(1);
   });
 
-  it("keeps the unconfirmed record, and its submission id, when history cannot be reloaded", async () => {
-    const { c, user } = await loseFirstAcknowledgment();
-    backend.down = true;
+  it("discard does not depend on, or wait for, a history read", async () => {
+    const { user } = await start("Offline discard", "late-commit");
+    const { held } = holdDetailGets();
     await user.click(screen.getByRole("button", { name: "Discard and reload" }));
-    await screen.findByText(/still unconfirmed/);
-    expect(screen.getByText("Not confirmed saved")).toBeInTheDocument();
+    expect(abandonedNote()).not.toBeNull(); // immediate; the held history read is irrelevant
+    expect(pendingNote()).toBeNull();
+    await waitFor(() => expect(held).toHaveLength(1));
+    await act(async () => held[0]!.release());
+    expect(abandonedNote()).not.toBeNull(); // a successful history read did not clear it
+  });
 
-    backend.down = false;
-    await user.click(screen.getByRole("button", { name: "Retry sending" }));
-    await screen.findByText("Fake reply to: one intent");
+  it("an abandoned message can still be settled by a same-id retry, without duplicates", async () => {
+    const { c, user } = await start("Abandon then settle", "late-commit", "settle me");
+    await user.click(screen.getByRole("button", { name: "Discard and reload" }));
+    backend.commitDeferred();
+    await flush();
+    expect(abandonedNote()).not.toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Retry abandoned message" }));
+    await waitFor(() => expect(abandonedNote()).toBeNull());
+    await screen.findByText("Fake reply to: settle me");
     expect(backend.sendCalls).toHaveLength(2);
     expect(backend.sendCalls[1]!.submissionId).toBe(backend.sendCalls[0]!.submissionId);
     expect(userMessages(c.id)).toHaveLength(1);
+    expect(pendingNote()).toBeNull();
   });
 
-  it("blocks sending and every recovery action while history is being reconciled", async () => {
-    const { user } = await loseFirstAcknowledgment();
-    const { held } = holdDetailGets();
-    await user.click(screen.getByRole("button", { name: "Discard and reload" }));
-    await waitFor(() => expect(held).toHaveLength(1));
-
-    await user.type(messageBox(), "typed meanwhile");
-    expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Retry sending" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Discard and reload" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: /send again as a new message/ })).toBeDisabled();
-
-    await act(async () => held[0]!.release());
+  it("abandoning and rewriting only prepares text; a new id exists only if the user presses Send", async () => {
+    const { c, user } = await start("Rewrite", "lost-ack");
+    await user.click(screen.getByRole("button", { name: /Abandon, then send again as a new message/ }));
     await screen.findByText("Fake reply to: one intent");
-    await waitFor(() => expect(screen.getByRole("button", { name: "Send" })).toBeEnabled());
-  });
-
-  it("offers a separate, explicit new message only after reconciling, with a fresh submission id", async () => {
-    const { c, user } = await loseFirstAcknowledgment();
-    await user.click(screen.getByRole("button", { name: /send again as a new message/ }));
-    await screen.findByText("Fake reply to: one intent"); // history reconciled first
     expect(messageBox()).toHaveValue("one intent");
-    expect(screen.getByText(/Restored from an unconfirmed send/)).toBeInTheDocument();
-    expect(backend.sendCalls).toHaveLength(1); // restoring is not sending
+    expect(screen.getByText(/Restored from a message you abandoned/)).toBeInTheDocument();
+    expect(abandonedNote()).not.toBeNull(); // the original stays visibly unresolved
+    expect(backend.sendCalls).toHaveLength(1);
 
     await user.click(screen.getByRole("button", { name: "Send" }));
     await waitFor(() => expect(backend.sendCalls).toHaveLength(2));
     expect(backend.sendCalls[1]!.submissionId).not.toBe(backend.sendCalls[0]!.submissionId);
     await waitFor(() => expect(userMessages(c.id)).toHaveLength(2)); // deliberate, not accidental
-    expect(screen.queryByText(/Restored from an unconfirmed send/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Restored from a message you abandoned/)).not.toBeInTheDocument();
   });
 
   it("retry still re-sends the very same submission", async () => {
-    const { c, user } = await loseFirstAcknowledgment();
+    const { c, user } = await start("Plain retry", "lost-ack");
     await user.click(screen.getByRole("button", { name: "Retry sending" }));
     await screen.findByText("Fake reply to: one intent");
     expect(backend.sendCalls[1]!.submissionId).toBe(backend.sendCalls[0]!.submissionId);
     expect(userMessages(c.id)).toHaveLength(1);
+    expect(pendingNote()).toBeNull();
   });
 });
 

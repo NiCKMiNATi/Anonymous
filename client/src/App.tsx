@@ -26,8 +26,11 @@ interface Draft {
   notice: string | null;
 }
 
-const RESTORED_AS_NEW_NOTICE =
-  "Restored from an unconfirmed send. If the earlier attempt is already shown above, clear this box; sending it saves a new message.";
+const ABANDONED_REWRITE_NOTICE =
+  "Restored from a message you abandoned before the server confirmed it. If that message is shown above, clear this box; sending this text saves a new message.";
+
+const REFUSED_AFTER_UNCERTAINTY_NOTICE =
+  "The server refused this retry, so this attempt saved nothing. An earlier attempt of the same message was never confirmed: check the history before sending this text again.";
 
 function asApiError(error: unknown): ApiError {
   return error instanceof ApiError
@@ -54,8 +57,9 @@ export function App() {
     conversationId: null,
     notice: null,
   });
-  const [reconciling, setReconciling] = useState(false);
-  const [reconcileError, setReconcileError] = useState<string | null>(null);
+  // Messages the user chose to stop tracking while their outcome was still unknown. They stay
+  // listed (not "failed") so the uncertainty is never hidden; presentation state only.
+  const [abandoned, setAbandoned] = useState<Pending[]>([]);
 
   // Freshness of history loads. `selectedIdRef` is the conversation the user is looking at now;
   // `detailSeq` changes whenever that selection changes (and on unmount) and for every new load,
@@ -127,7 +131,6 @@ export function App() {
 
   useEffect(() => {
     setSendError(null);
-    setReconcileError(null);
     setDetail(null);
     if (!selectedId) {
       setDetailState("idle");
@@ -150,7 +153,13 @@ export function App() {
     }
   };
 
-  const submit = async (conversationId: string, submissionId: string, content: string) => {
+  // `afterUncertainty`: an earlier transmission of this same submission was never confirmed.
+  const submit = async (
+    conversationId: string,
+    submissionId: string,
+    content: string,
+    afterUncertainty = false,
+  ) => {
     setSendError(null);
     setPending({ conversationId, submissionId, content, status: "sending" });
     try {
@@ -169,15 +178,16 @@ export function App() {
         });
         return;
       }
-      // A definite refusal (busy, invalid, not found): nothing was saved; keep the draft for the
-      // conversation it was written in.
+      // A definite refusal (busy, invalid, not found): this attempt saved nothing; keep the draft
+      // for the conversation it was written in. If an earlier transmission was never confirmed,
+      // say so: only the server's answer to this id settles it, and a refusal is not that.
       setPending(null);
       setSendError({ conversationId, message: apiError.message });
       setDraft((current) => ({
         key: current.key + 1,
         text: content,
         conversationId,
-        notice: null,
+        notice: afterUncertainty ? REFUSED_AFTER_UNCERTAINTY_NOTICE : null,
       }));
       await loadDetail(conversationId, { quiet: true });
     }
@@ -189,38 +199,41 @@ export function App() {
     void submit(selectedId, newSubmissionId(), content);
   };
 
-  // Same submission id: the server answers a duplicate with the original outcome.
+  // Same submission id: the server answers with the original outcome if it was saved (never a
+  // duplicate), or saves it now. That answer, not a history snapshot, settles the outcome.
   const retry = () => {
-    if (pending) void submit(pending.conversationId, pending.submissionId, pending.content);
+    if (pending) void submit(pending.conversationId, pending.submissionId, pending.content, true);
   };
 
-  // An unconfirmed send is only forgotten after the saved history was reloaded, so the
-  // `submissionId` is never dropped while its outcome is still unknown. Nothing is re-sent here.
-  const reconcile = async (restoreAsNewMessage: boolean) => {
-    if (!pending || reconciling) return;
-    const { conversationId, content } = pending;
-    setReconciling(true);
-    setReconcileError(null);
-    const result = await loadDetail(conversationId, { quiet: true });
-    setReconciling(false);
-    if (result !== "applied") {
-      if (result === "failed") {
-        setReconcileError(
-          "Could not reload the saved history, so this message is still unconfirmed. Try again.",
-        );
-      }
-      return;
-    }
+  // Abandoning is the user's decision to stop tracking an uncertain message. It sends nothing and
+  // records no outcome: the message is kept, labelled as abandoned, with its submission id.
+  // Reloading the history only refreshes the view; it never changes a submission's state, because
+  // a snapshot can predate a save that is still arriving.
+  const abandon = (rewriteAsNewMessage: boolean) => {
+    if (!pending || pending.status !== "unknown") return;
+    const record = pending;
+    setAbandoned((current) => [...current, record]);
     setPending(null);
-    if (restoreAsNewMessage) {
+    if (rewriteAsNewMessage) {
       setDraft((current) => ({
         key: current.key + 1,
-        text: content,
-        conversationId,
-        notice: RESTORED_AS_NEW_NOTICE,
+        text: record.content,
+        conversationId: record.conversationId,
+        notice: ABANDONED_REWRITE_NOTICE,
       }));
     }
+    void loadDetail(record.conversationId, { quiet: true });
   };
+
+  const retryAbandoned = (submissionId: string) => {
+    const record = abandoned.find((item) => item.submissionId === submissionId);
+    if (!record || pending !== null) return;
+    setAbandoned((current) => current.filter((item) => item.submissionId !== submissionId));
+    void submit(record.conversationId, record.submissionId, record.content, true);
+  };
+
+  const forgetAbandoned = (submissionId: string) =>
+    setAbandoned((current) => current.filter((item) => item.submissionId !== submissionId));
 
   const refresh = () => {
     void loadConversations();
@@ -234,9 +247,9 @@ export function App() {
 
   const showDetail = detail !== null && selectedId !== null && detail.conversation.id === selectedId;
   const visiblePending = pending && pending.conversationId === selectedId ? pending : null;
+  const visibleAbandoned = abandoned.filter((item) => item.conversationId === selectedId);
   const unsettled = showDetail && detail.runs.some((run) => UNSETTLED.has(run.status));
-  const composerDisabled =
-    pending !== null || unsettled || detailState !== "ready" || !showDetail || reconciling;
+  const composerDisabled = pending !== null || unsettled || detailState !== "ready" || !showDetail;
   let disabledReason: string | undefined;
   if (unsettled && pending === null) {
     disabledReason =
@@ -311,18 +324,20 @@ export function App() {
             <>
               <div className="conversation__header">
                 <h2>{detail.conversation.title ?? "Untitled conversation"}</h2>
-                <button type="button" onClick={refresh} disabled={reconciling}>
+                <button type="button" onClick={refresh}>
                   Refresh
                 </button>
               </div>
               <MessageList
                 detail={detail}
                 pending={visiblePending}
+                abandoned={visibleAbandoned}
                 onRetry={retry}
-                onDiscard={() => void reconcile(false)}
-                onSendAsNew={() => void reconcile(true)}
-                reconciling={reconciling}
-                reconcileError={reconcileError}
+                onAbandon={() => abandon(false)}
+                onAbandonAndRewrite={() => abandon(true)}
+                onRetryAbandoned={retryAbandoned}
+                onForgetAbandoned={forgetAbandoned}
+                busy={pending !== null}
               />
               <Composer
                 key={draft.key}
