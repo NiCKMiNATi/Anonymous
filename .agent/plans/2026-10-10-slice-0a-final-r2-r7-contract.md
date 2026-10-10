@@ -2,7 +2,7 @@
 
 ## 1. Title, status, and purpose
 
-**Status:** Complete for scope. R2: fixed. R7: `OPEN_PENDING_OWNER_DECISION` — candidate wording prepared, **no normative document changed**. Base `873926f`; supersedes the FR-15 application in that commit (withdrawn here).
+**Status:** Complete. R2: fixed. R7: **resolved 2026-10-11** — the owner accepted the contract and the edits below (§10) were applied; see §12. (Between `83da324` and the closure commit the wording was prepared but not applied; base `873926f`; supersedes the FR-15 application in that commit, which was withdrawn.)
 
 Codex's lightweight review of `9ded738..1eaae70` found: **R2 (MEDIUM)** a refused retransmission lost the unresolved submission's correlation; **R7 (MEDIUM)** my timestamp proposal contained unsupported wall-clock bounds and described unknown-commit timestamp disposal incorrectly. This plan fixes R2 and corrects/prepares R7. It does not implement server-side fencing, LD-04, Slice 0B, authentication or Memory.
 
@@ -52,8 +52,8 @@ Server: `uv run pytest`, `uv run pytest review_tests/test_slice0a_review.py`, `u
 - [x] Normative edits withdrawn; verified identical to `1eaae70`.
 - [x] R7 corrections in notes and tests; this plan.
 - [x] Full validation (§11) and local commit.
-- [ ] Owner decision on the candidate FR-15 wording (blocked on the owner).
-- [ ] Codex re-review.
+- [x] 2026-10-11: owner accepted the FR-15 contract; edits A–D applied (§12).
+- [ ] Codex re-review (optional, selective; not performed).
 
 ## 9. Discoveries
 
@@ -68,9 +68,9 @@ Server: `uv run pytest`, `uv run pytest review_tests/test_slice0a_review.py`, `u
 - **D-15:** Normative FR-15 changes withheld pending owner approval; prepared edits below. Supersedes D-10's "applied" addendum in the earlier plan.
 - **D-16:** Fencing stays unimplemented (explicitly out of scope).
 
-### Proposed normative edits (NOT applied)
+### Proposed normative edits (historical; APPLIED 2026-10-11 — see §12 for deviations)
 
-Apply only on explicit owner approval; then re-run the commit-time tests and update `docs/implementation/slice-0a.md` status.
+These were prepared while approval was pending and are retained as the decision record.
 
 **A. `docs/02-requirements.md`, FR-15 (`### FR-15 — Persist and continuously display message timestamps`; keep the heading text so existing anchors keep working).**
 
@@ -110,3 +110,19 @@ Apply only on explicit owner approval; then re-run the commit-time tests and upd
 **Limitations:** unfenced ids (an abandoned-then-rewritten message can duplicate if the delayed original lands); in-memory records lost on browser reload; no real-browser, Windows or iPhone verification; commit-gap measurement is one host and informational only.
 
 **Follow-up:** owner decision on the wording → apply edits A–D and update notes → Codex re-review → LD-04 design task (which may also decide fencing).
+
+## 12. Closure (2026-10-11)
+
+**Owner decision:** the revised FR-15 contract was accepted (ten semantics: server-authoritative absolute commit timestamp; sampled in the committing transaction after write authority and before the commit attempt; authoritative only if committed; uncertain outcome neither claimed as success nor discarded; reconciliation preserves the original; no physical-equality/millisecond/unconditional wall-clock promise; identity/position/timestamp independent; continuous no-hover display; full date/time accessible in the local/selected timezone; history and provenance preserved).
+
+**Applied:** `docs/02-requirements.md` FR-15 (statement, rationale, acceptance criteria, status); aligned `docs/01-domain-model.md` §9, `docs/03-v0-scope.md` (summary row, FR-15 paragraph, requirement table), `docs/04-architecture.md` (FR-15 paragraph, traceability row), `docs/05-data-model.md` (glossary, §5, LM-03); `docs/implementation/slice-0a.md` (status, R7, pending platform acceptance).
+
+**Deviations from the §10 proposal (checked against the accepted semantics):**
+1. §10-A's Statement omitted the display clauses ("near the message action area", no hover, secondary full date/time, timestamps not the sole ordering source), relying on the acceptance criteria. The task directs that the original display requirements not be weakened, so the Statement keeps them. The sentence now reads "A precise full date/time shall remain available as secondary detail" (was "may be exposed"), following the owner's "must remain accessible"; the implementation provides it (the `title` attribute) and iPhone discoverability is a pending device check.
+2. The Statement also states that the timestamp need not provide "millisecond accuracy or any unconditional wall-clock bound" and that an uncertain outcome must not "discard the possible original timestamp", matching semantics 4 and 6 literally.
+3. The Status line records owner acceptance of both Statement and acceptance criteria on 2026-10-11 (the proposal had left the criteria "pending").
+4. §10-E's expectation that `03` summary/requirement rows needed no change was revisited: the FR-15 summary row and requirement-table row were reworded for consistency ("commitment instant" → "commit timestamp").
+
+**Verification:** implementation unchanged; one test added (`test_a_reading_taken_for_an_attempt_known_not_to_have_committed_is_not_retained`) because the accepted acceptance criteria require that case and no test covered it; test docstring updated from "candidate" to "accepted". Results: server `pytest` 110 passed, Codex backend review suite 18 passed, `mypy` clean, `ruff check`/`format --check` clean; client `npm test` 53 passed, Codex client review suite 7 passed, `tsc` clean, `npm run build` passes.
+
+**Not complete:** platform acceptance on a real browser, Windows and iPhone (see `docs/implementation/slice-0a.md`). R6/LD-04 remains the gate before any real model runtime (Slice 0B).

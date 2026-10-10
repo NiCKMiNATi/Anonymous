@@ -2,7 +2,7 @@
 
 Anonymous is a local-first personal AI system and conversation workspace. It aims to preserve conversations, knowledge, memory, files, and provenance while keeping models replaceable and private information under user control.
 
-**Current phase: architecture and design, with the first implementation slice in progress.** [Vertical Slice 0A](docs/implementation/slice-0a.md) (persistent local chat with a fake model) is implemented as a *development-only* slice: no authentication, loopback only, SQLite as a provisional development adapter. It is not finished V0 and not an access-capable build. Further implementation still requires a new implementation task.
+**Current phase: architecture and design, with the first implementation slice closed on the development host.** [Vertical Slice 0A](docs/implementation/slice-0a.md) (persistent local chat with a fake model) is implemented as a *development-only* slice (platform acceptance on real browsers, Windows and iPhone is still pending): no authentication, loopback only, SQLite as a provisional development adapter. It is not finished V0 and not an access-capable build. Further implementation still requires a new implementation task.
 
 Start with the authoritative drafts:
 

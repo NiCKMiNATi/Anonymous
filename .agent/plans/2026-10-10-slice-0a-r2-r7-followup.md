@@ -2,7 +2,7 @@
 
 ## 1. Title, status, and purpose
 
-**Status:** Complete for scope; R2 fixed, R7 `OPEN_PENDING_OWNER_DECISION`. Base `dfc33d0`, head at start `9ded738` (contains the first remediation). Codex's lightweight review of `dfc33d0..9ded738` returned **PASS_WITH_REQUIRED_FIXES**: R1, R3, R4, R5 resolved; R2 not resolved; R7 is a design discrepancy. This plan fixes R2 and evaluates R7 without changing any normative requirement.
+**Status:** Complete for scope; R2 fixed, R7 was `OPEN_PENDING_OWNER_DECISION` and is **resolved 2026-10-11** (see the [final contract plan](2026-10-10-slice-0a-final-r2-r7-contract.md) §12). Base `dfc33d0`, head at start `9ded738` (contains the first remediation). Codex's lightweight review of `dfc33d0..9ded738` returned **PASS_WITH_REQUIRED_FIXES**: R1, R3, R4, R5 resolved; R2 not resolved; R7 is a design discrepancy. This plan fixes R2 and evaluates R7 without changing any normative requirement.
 
 ## 2. Repository context
 

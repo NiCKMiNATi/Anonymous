@@ -1,6 +1,6 @@
-"""What the SQLite development adapter does with message commit instants (FR-15/LM-03 candidate).
+"""Commit instants in the SQLite development adapter (FR-15/LM-03, accepted contract).
 
-Candidate contract (owner-supplied FR-15 wording; NOT yet approved, normative documents unchanged):
+Accepted contract (FR-15 as accepted by the owner 2026-10-11; docs/02-requirements.md):
 the commit timestamp is sampled within the committing transaction after write authority was
 obtained and before the commit attempt; it is authoritative only if the message commits; after an
 uncertain outcome nothing is assumed (no rollback is inferred) and reconciliation determines
@@ -328,6 +328,41 @@ def _inject_uncertain_commit(monkeypatch: pytest.MonkeyPatch, *, durable: bool) 
         "connect",
         lambda path: UncertainCommit(real_connect(path), durable=durable, fired=fired),
     )
+
+
+class FailsAfterSampling(RecordingConnection):
+    """A statement after the clock read fails definitively, so the transaction cannot commit."""
+
+    def __init__(self, inner: object) -> None:
+        super().__init__(inner, [])
+
+    def execute(self, sql: str, *args: object) -> object:
+        if sql.lstrip().upper().startswith("INSERT INTO MODEL_RUNS"):
+            raise sqlite3.IntegrityError("injected: definite failure before commit")
+        return self._inner.execute(sql, *args)  # type: ignore[attr-defined]
+
+
+def test_a_reading_taken_for_an_attempt_known_not_to_have_committed_is_not_retained(
+    db_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    owner_and_conversation: tuple[UserId, ConversationId],
+) -> None:
+    owner, cid = owner_and_conversation
+    clock = ControlledClock()
+    store = SqliteStore(db_path, clock)
+    real_connect = connect
+
+    with monkeypatch.context() as patch:
+        patch.setattr(store_module, "connect", lambda path: FailsAfterSampling(real_connect(path)))
+        with pytest.raises(Exception) as failure:
+            admit(store, owner, cid)
+    assert not isinstance(failure.value, StorageOutcomeUnknown)  # a known failure, not unknown
+    assert clock.reads == 1  # the instant was sampled for the attempt ...
+    assert len(store.get_history(owner, cid).messages) == 0  # ... and nothing was persisted with it
+
+    clock.current = T0 + timedelta(hours=1)
+    later = admit(store, owner, cid)
+    assert later.user_message.committed_at == T0 + timedelta(hours=1)  # its own reading, not T0
 
 
 def test_uncertain_commit_that_was_durable_keeps_its_original_instant_on_reconciliation(

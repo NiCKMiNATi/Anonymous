@@ -92,7 +92,7 @@ Component IDs below identify responsibilities, not packages, processes, tables, 
 
 Application persistence authority belongs to C03/C04/C05 under C09 rules, through C08. C06 has read-only access to eligible source information. C01 holds a view; C07 receives only constructed invocation input. Modules may share a backing store but do not reach into another module's concrete storage details.
 
-For FR-15, C05/C08 establish and preserve each user and assistant message’s authoritative timestamp at commitment to persistent history as an absolute instant independent of client timezone. C04 exposes the retained history; C01 renders each displayed message’s time continuously near the message action area without hover in the selected/local timezone, with optional precise full date/time as secondary detail. C09 ensures timestamps are not the sole source of conversational ordering. These responsibilities select no physical representation or API.
+For FR-15, C05/C08 establish and preserve each user and assistant message’s authoritative commit timestamp as an absolute instant independent of client timezone: it is sampled within the committing transaction after write authority is obtained and before the commit attempt, is authoritative only if that transaction commits, is not guaranteed equal to the storage engine’s physical commit-completion instant, and on an uncertain outcome the original is preserved if reconciliation finds the operation committed. C04 exposes the retained history; C01 renders each displayed message’s time continuously near the message action area without hover in the selected/local timezone, with optional precise full date/time as secondary detail. C09 ensures timestamps are not the sole source of conversational ordering. These responsibilities select no physical representation or API.
 
 “Canonical persistent application state” means authoritative ownership of saved records. It is distinct from DM's generated canonical/compressed state, which is deferred. Saved assistant text remains preserved evidence of generated output; its model origin does not make it disposable and does not turn it into explicit user knowledge.
 
@@ -254,7 +254,7 @@ The matrix assigns every selected RB subset an owner. Applicability and subset m
 | FR-09 | PARTIAL_V0 | C01/C04/C08: browse retained old messages independently of current model input; no semantic retrieval. |
 | FR-12 | REQUIRED_V0 | C05/C07/C08/C09: distinct execution/model/runtime identities and outcomes. |
 | FR-14 | REQUIRED_V0 | C03/C04/C08/C09: persistent user ownership independent of device/session. |
-| FR-15 | REQUIRED_V0 | C01/C04/C05/C08/C09: persistent commitment instants, continuous selected/local time near message actions without hover, and ordering not based solely on timestamps. |
+| FR-15 | REQUIRED_V0 | C01/C04/C05/C08/C09: persistent commit timestamps (transaction-sampled; original preserved on reconciliation), continuous selected/local time near message actions without hover, and ordering not based solely on timestamps. |
 | NFR-01 | REQUIRED_V0 | C03/C07/C08/C10: provisioned local lifecycle has no required cloud dependency. |
 | NFR-02 | PARTIAL_V0 | C05/C07/C09/C10: one live path plus controlled replacement fixture; history unaffected. |
 | NFR-03 | REQUIRED_V0 | C01/C04/C08: canonical history lives on server; no client export/import prerequisite. |

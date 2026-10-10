@@ -1,6 +1,6 @@
 # Implementation notes — V0 Vertical Slice 0A (persistent local chat with a fake model)
 
-**Status:** Implemented as a development-only slice. Not finished V0, not an access-capable build, not release evidence. The [ExecPlan](../../.agent/plans/2026-10-07-v0-slice-0a-persistent-chat-fake-model.md) records scope, decisions and results. This page describes *what the code does*; the design documents ([architecture](../04-architecture.md), [logical data model](../05-data-model.md), ADRs) remain authoritative and are unchanged. Nothing here finalizes an open design question.
+**Status:** Closed as a development-only slice (2026-10-11). Implementation and tests complete on the development host (macOS); the FR-15 contract is accepted and applied (R1–R7 all resolved). **Platform acceptance is still pending** on real browsers, Windows and iPhone — see [Pending platform acceptance](#pending-platform-acceptance). Not finished V0, not an access-capable build, not release evidence. The [ExecPlan](../../.agent/plans/2026-10-07-v0-slice-0a-persistent-chat-fake-model.md) records scope, decisions and results. This page describes *what the code does*; the design documents ([architecture](../04-architecture.md), [logical data model](../05-data-model.md), ADRs) remain authoritative. Nothing here finalizes an open design question.
 
 ## What is (and is not) there
 
@@ -64,7 +64,7 @@ IDs are UUIDv4 canonical strings. Order is an integer `position` per conversatio
 
 ## Commit instants (FR-15 / LM-03) — what is and is not guaranteed
 
-Investigated for review finding R7. Behavior is unchanged; this records exactly what the adapter does so no stronger claim is made.
+Review finding R7, resolved by the accepted FR-15 contract ([FR-15](../02-requirements.md#fr-15--persist-and-continuously-display-message-timestamps), accepted by the owner 2026-10-11). The adapter's behavior was verified against that contract and needed no change; this records exactly what it does so no stronger claim is made.
 
 | Step | When it happens |
 | --- | --- |
@@ -87,9 +87,33 @@ What the adapter does, stated as the order of events (not as wall-clock inequali
 
 **Observed interval, one host, informational only (no tolerance exists or is proposed):** `tools/evidence/sqlite/measure_commit_instant_gap.py`, macOS 27 arm64, Python 3.12, SQLite 3.53.1, WAL + `synchronous = FULL`, 300 synthetic transactions per kind, two runs, measured on a monotonic counter: clock read to `COMMIT` returning has median ≈ 0.2–0.4 ms and p99 ≤ ≈ 1 ms, with one 2.6 ms outlier. SQLite on macOS does not request a full media flush unless `fullfsync` is enabled, so this under-represents a power-safe flush; Windows and other targets must be measured separately (hardware gates G-01–G-03). It is context, not a contract.
 
-### R7 status: OPEN_PENDING_OWNER_DECISION (candidate wording prepared, nothing normative changed)
+### R7 status: RESOLVED (contract accepted and applied 2026-10-11)
 
-Full FR-15 compliance is **not** claimed. The owner-supplied wording is the *candidate* contract. It was briefly applied to the normative documents in commit `873926f` by mistake (it had not been approved); that was withdrawn and the five normative documents (`01`, `02`, `03`, `04`, `05`) are byte-identical to their state before it. The exact proposed edits, with the affected references, are prepared in [the remediation plan](../../.agent/plans/2026-10-10-slice-0a-final-r2-r7-contract.md#proposed-normative-edits-not-applied). Corrections made to my earlier proposal after the Codex review: (1) no numeric or wall-clock bounds ("never earlier than the lock / never later than COMMIT") — those are not promised and not stated; (2) an *unknown* commit outcome does not imply rollback or discard of the timestamp — reconciliation decides, the original timestamp is kept if the operation committed; (3) sampling is stated as transaction-scoped, after write authority and before the commit attempt; (4) ordering stays independent of timestamps. Still open on approval: the owner's confirmation of the adapted acceptance criteria; display acceptance on Windows, macOS and iPhone; a real-browser check; Windows timing.
+The owner accepted the revised FR-15 contract; it is applied in `docs/02-requirements.md` (FR-15 Statement, rationale, acceptance criteria, status) and aligned in `docs/01-domain-model.md` §9, `docs/03-v0-scope.md`, `docs/04-architecture.md` and `docs/05-data-model.md` (glossary, §5, LM-03). The original display requirements (continuous visibility near the message action area, no hover, selected/local timezone, secondary full date/time) are retained. History note: the wording was applied prematurely in `873926f`, withdrawn in `83da324` because it had not been approved, and applied again on acceptance.
+
+Mapping of the accepted semantics to what is tested on the development host:
+
+| Accepted semantic | Verified by |
+| --- | --- |
+| Every committed user/assistant message has a server-authoritative absolute timestamp | `test_commit_time.py`, `test_store_behavior.py`; UTC text instant in every message DTO |
+| Sampled inside the committing transaction, after write authority, before the commit attempt | `test_each_write_transaction_samples_the_clock_once_inside_itself`, `test_instant_is_read_before_the_commit_attempt_not_at_commit`, lock-wait and slow-generation fixtures |
+| Authoritative only for an operation that committed; an attempt known not to have committed retains none | `test_a_reading_taken_for_an_attempt_known_not_to_have_committed_is_not_retained` (added at closure to cover this acceptance criterion; the implementation needed no change) |
+| Uncertain outcome: no success claim, possible original timestamp not discarded; reconciliation preserves the original if it committed, else a later success samples its own | `test_uncertain_commit_that_was_durable_…`, `test_uncertain_commit_that_did_not_persist_…`, `test_uncertain_publication_that_was_durable_…`; client "Not confirmed saved" shows no time |
+| No promise of physical commit-time equality, millisecond accuracy or unconditional bounds | stated above; delay tests assert only *which* reading is stored |
+| Identity, position and timestamp independent; clock adjustments never reorder history | `test_order_is_server_assigned_even_when_instants_are_equal_or_decreasing` (`test_execution.py`); client renders server order, not timestamp order (`App.test.tsx`) |
+| Continuously visible near the message, no hover; full date/time available; client-local or selected timezone | `MessageItem`; `App.test.tsx` (visible `<time>` per message), `time.test.ts` (timezone, date boundary) — **jsdom only; see pending acceptance** |
+| Existing history and provenance preserved | no schema or data change was made |
+
+This is the *accepted contract* and *development-host test evidence*. It is not full V0 acceptance of FR-15: the display acceptance criteria require inspection on Windows, macOS and iPhone.
+
+## Pending platform acceptance
+
+Nothing below has been done; V0 platform acceptance (NFR-05, V0-AC-01–V0-AC-03, FR-15 display criteria) is **not** complete.
+
+- **Real browser** — the client has only been exercised under jsdom and headless Chrome on macOS. The no-hover, continuously-visible time and layout need inspection in real Safari/Chrome/Edge; `toBeVisible` in jsdom does not evaluate real layout.
+- **Windows** — the slice has never run on Windows (server or client). SQLite/WAL/`synchronous = FULL` behavior and the commit-gap timing are unmeasured there (hardware gates G-01–G-03).
+- **iPhone/Safari** — never run. Needs the real viewport, touch reachability, and a check that the secondary full date/time (currently the `title` attribute, which has no hover on touch) is actually discoverable; if it is not, that is a client change to make then.
+- **Timezone display** — verify on each device, across a date boundary, with the device's real local timezone (unit-tested only).
 
 ## Frontend
 
@@ -126,4 +150,4 @@ Changes made after the independent review ([report](../reviews/slice-0a-codex-re
 - Conversation creation is not idempotent.
 - No client linter (type-check only).
 - The conversation *list* has no freshness guard analogous to the history one (a stale list response could briefly omit a just-created conversation until the next refresh); not part of the accepted findings.
-- Never verified on Windows or iPhone/Safari; only headless Chrome on macOS and jsdom.
+- Never verified on Windows or iPhone/Safari; only headless Chrome on macOS and jsdom (see Pending platform acceptance).
