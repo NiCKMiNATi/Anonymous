@@ -21,13 +21,16 @@ from anonymous.domain.errors import (
     StorageFailure,
     StorageOutcomeUnknown,
 )
+from anonymous.domain.evidence import CompletionObserved, EvidenceBasis
 from anonymous.domain.ids import UserId, new_uuid
 from anonymous.domain.models import MessageRole, RunStatus
 from tests.conftest import Services
+from tests.dispatching import dispatch
 from tests.doubles import (
     START,
     STORAGE_FAILURE,
-    STORAGE_UNKNOWN,
+    BoundStore,
+    Fault,
     FaultyExecutionStore,
     ManualClock,
     RecordingModel,
@@ -40,7 +43,7 @@ def send(services: Services, owner: UserId, cid: str, text: str = "hello", sid: 
     return services.conversations.send_message(owner, cid, sid or new_uuid(), text)
 
 
-# -- happy path and provenance -----------------------------------------------------------------
+# -- happy path and provenance -------------------------------------------------------------------
 
 
 def test_send_commits_both_messages_and_links_response_to_its_run(
@@ -95,7 +98,7 @@ def test_model_receives_constructed_view_of_the_committed_prefix(
     ]
 
 
-# -- durability ordering ----------------------------------------------------------------------
+# -- durability ordering -------------------------------------------------------------------------
 
 
 def test_user_message_and_dispatch_are_durable_before_the_model_runs(
@@ -105,7 +108,7 @@ def test_user_message_and_dispatch_are_durable_before_the_model_runs(
 
     def inspect(_: ModelRequest) -> None:
         # A different connection and a brand-new store: only committed data is visible.
-        fresh = SqliteStore(db_path, ManualClock())
+        fresh = BoundStore(db_path, ManualClock())
         history = fresh.get_history(owner, conversation_id)
         observed["messages"] = [(m.role, m.content) for m in history.messages]
         observed["run"] = history.runs[0]
@@ -119,6 +122,10 @@ def test_user_message_and_dispatch_are_durable_before_the_model_runs(
     run = observed["run"]
     assert run.status is RunStatus.IN_FLIGHT  # type: ignore[attr-defined]
     assert (run.model_id, run.runtime_id) == ("test-model-1", "test-runtime-1")  # type: ignore[attr-defined]
+    # The binding, provenance, configuration, slot and the started-handoff marker were all durable
+    # before the runtime did any work (T3, T3b).
+    assert run.binding is not None and run.provenance is not None  # type: ignore[attr-defined]
+    assert run.handoff.value == "STARTED" and run.slot_id and run.configuration_digest  # type: ignore[attr-defined]
 
 
 def test_model_is_not_invoked_when_admission_cannot_be_saved(
@@ -151,7 +158,7 @@ def test_model_is_not_invoked_when_dispatch_cannot_be_recorded(
     assert len(store.get_history(owner, conversation.id).messages) == 1  # user message kept
 
 
-# -- ordering and time ------------------------------------------------------------------------
+# -- ordering and time ---------------------------------------------------------------------------
 
 
 def test_order_is_server_assigned_even_when_instants_are_equal_or_decreasing(
@@ -159,7 +166,7 @@ def test_order_is_server_assigned_even_when_instants_are_equal_or_decreasing(
 ) -> None:
     # Instants: equal for the first three commits, then going BACKWARDS.
     instants = [START, START, START, START, START, START - timedelta(days=1)]
-    clocked = SqliteStore(db_path, SequenceClock(instants))
+    clocked = BoundStore(db_path, SequenceClock(instants))
     services = Services(clocked, RecordingModel("r"))
     conversation = services.conversations.create_conversation(owner)
     first = send(services, owner, conversation.id, "q1")
@@ -190,7 +197,7 @@ def test_commit_instant_is_absolute_and_unchanged_by_reads_and_retries(
     assert reread.committed_at.utcoffset() == timedelta(0)
 
 
-# -- failure behavior --------------------------------------------------------------------------
+# -- failure behavior ----------------------------------------------------------------------------
 
 
 def test_model_failure_preserves_user_message_and_fabricates_no_response(
@@ -240,7 +247,8 @@ def test_output_from_a_different_model_than_dispatched_is_refused(
     services = Services(store, model)
     conversation = services.conversations.create_conversation(owner)
     outcome = send(services, owner, conversation.id)
-    assert outcome.run.failure_code == "runtime_identity_mismatch"
+    assert outcome.run.failure_code == "model_identity_mismatch"
+    assert outcome.run.termination_basis is EvidenceBasis.RUNTIME_REPORTED_TERMINAL
     assert outcome.assistant_message is None
 
 
@@ -259,28 +267,72 @@ def test_save_failure_after_generation_is_recorded_as_failed_without_assistant_m
     assert history.runs[0].status is RunStatus.FAILED
 
 
-def test_unknown_save_outcome_is_reported_as_unknown_and_reconciled_by_replay(
+def test_uncertain_publication_that_did_land_is_case_a_and_preserves_success(
     store: SqliteStore, owner: UserId
 ) -> None:
+    """Case A: the commit was durable but its result unknown. Success and its original identity
+    and commit instant are preserved; the model is called exactly once."""
     faulty = FaultyExecutionStore(store)
-    faulty.fail_publish = STORAGE_UNKNOWN
+    faulty.script("publish_response", Fault("unknown_durable"))
     model = RecordingModel("maybe saved")
     services = Services(faulty, model)
     conversation = services.conversations.create_conversation(owner)
     sid = new_uuid()
-    with pytest.raises(StorageOutcomeUnknown):
-        send(services, owner, conversation.id, "q", sid)
-
-    # Nothing is claimed: the run is still unsettled and the conversation stays closed.
-    history = store.get_history(owner, conversation.id)
-    assert history.runs[0].status is RunStatus.IN_FLIGHT
-    with pytest.raises(ConversationBusy):
-        send(services, owner, conversation.id, "another")
-
-    # Reconciliation by replay reports the real state and never runs inference again.
+    outcome = send(services, owner, conversation.id, "q", sid)
+    assert outcome.run.status is RunStatus.SUCCEEDED and outcome.assistant_message is not None
+    stored = store.get_history(owner, conversation.id).messages[1]
+    assert stored.id == outcome.assistant_message.id
+    assert stored.committed_at == outcome.assistant_message.committed_at
     replay = send(services, owner, conversation.id, "q", sid)
-    assert replay.replayed and replay.run.status is RunStatus.IN_FLIGHT
+    assert replay.replayed and replay.assistant_message == outcome.assistant_message
     assert len(model.requests) == 1
+
+
+def test_uncertain_publication_that_did_not_land_is_case_b_and_settles_on_evidence(
+    store: SqliteStore, owner: UserId
+) -> None:
+    """Case B: no message exists and closure (with B3: the bound instance delivered) proves it
+    cannot appear later. Nothing is fabricated; an explicit retry follows."""
+    faulty = FaultyExecutionStore(store)
+    faulty.script("publish_response", *[Fault("unknown_lost")] * 3)
+    model = RecordingModel("never saved")
+    services = Services(faulty, model)
+    conversation = services.conversations.create_conversation(owner)
+    outcome = send(services, owner, conversation.id, "q")
+    assert outcome.run.status is RunStatus.FAILED and outcome.assistant_message is None
+    assert outcome.run.failure_code == "response_not_saved"
+    assert outcome.run.termination_basis is EvidenceBasis.RUNTIME_REPORTED_TERMINAL
+    assert outcome.run.completion_observed is CompletionObserved.YES
+    assert len(model.requests) == 1  # the model is never called again to find out
+
+
+def test_uncertain_publication_with_unreadable_store_is_case_c_and_stays_unresolved(
+    store: SqliteStore, owner: UserId
+) -> None:
+    """Case C: neither the commit nor a read is possible. Nothing is claimed or changed."""
+    faulty = FaultyExecutionStore(store)
+    faulty.script("publish_response", Fault("unknown_lost"))
+    faulty.script("get_run", Fault("pass"), Fault("fail"))
+    services = Services(faulty, RecordingModel("held"))
+    conversation = services.conversations.create_conversation(owner)
+    with pytest.raises(StorageOutcomeUnknown):
+        send(services, owner, conversation.id, "q")
+    run = store.get_history(owner, conversation.id).runs[0]
+    assert run.status is RunStatus.IN_FLIGHT and run.closed_at is None  # unchanged
+    with pytest.raises(ConversationBusy):  # admission stays closed while the run is unresolved
+        store.admit_submission(
+            owner=owner,
+            conversation_id=conversation.id,
+            submission_id=new_uuid(),  # type: ignore[arg-type]
+            content="another",
+            content_sha256="x",
+        )
+    # Once the store is readable again, reconcile resolves it from evidence, never by guessing:
+    # the bound instance reports the attempt ended and no message exists (Case B).
+    services.coordinator.reconcile()
+    settled = store.get_history(owner, conversation.id).runs[0]
+    assert settled.status is RunStatus.FAILED
+    assert settled.termination_basis is EvidenceBasis.EXECUTION_TERMINATED_VERIFIED
 
 
 def test_failure_that_cannot_be_recorded_is_not_hidden(store: SqliteStore, owner: UserId) -> None:
@@ -320,7 +372,7 @@ def test_real_storage_failure_on_a_read_only_database_saves_nothing(
     assert "during outage" not in texts and texts[0] == "before"
 
 
-# -- validation and identifiers ---------------------------------------------------------------
+# -- validation and identifiers ------------------------------------------------------------------
 
 
 def test_invalid_input_never_reaches_storage_or_model(store: SqliteStore, owner: UserId) -> None:
@@ -348,7 +400,7 @@ def test_missing_conversation(store: SqliteStore, owner: UserId) -> None:
         services.conversations.open_conversation(owner, new_uuid())
 
 
-# -- idempotency, busy admission, recovery ----------------------------------------------------
+# -- idempotency, busy admission, recovery -------------------------------------------------------
 
 
 def test_retransmitted_submission_creates_no_duplicates_and_no_second_run(
@@ -470,11 +522,11 @@ def test_simultaneous_sends_admit_exactly_one(store: SqliteStore, owner: UserId)
     assert all(r.status is RunStatus.SUCCEEDED for r in history.runs)
 
 
-def test_restart_leaves_unresolved_work_closed_and_never_replays_it(
+def test_restart_reconciles_an_orphan_by_evidence_and_never_replays_it(
     db_path: Path, owner: UserId, store: SqliteStore
 ) -> None:
     model = RecordingModel()
-    services = Services(store, model)
+    services = Services(store, model, boot_id="boot-before")
     conversation = services.conversations.create_conversation(owner)
     admitted = store.admit_submission(
         owner=owner,
@@ -483,18 +535,24 @@ def test_restart_leaves_unresolved_work_closed_and_never_replays_it(
         content="interrupted",
         content_sha256="x",
     )
-    store.record_dispatch(admitted.run.id, "test-model-1", "test-runtime-1")
+    dispatch(store, admitted.run.id, boot="boot-before")  # then the process "dies" mid-run
 
-    restarted = SqliteStore(db_path, ManualClock())  # "process restart"
-    report = restarted.recover_unsettled_runs()
-    assert report.marked_indeterminate == 1
-    restarted_services = Services(restarted, model)
-    with pytest.raises(ConversationBusy):
-        send(restarted_services, owner, conversation.id, "new")
-    history = restarted_services.conversations.open_conversation(owner, conversation.id)
-    assert history.runs[0].status is RunStatus.INDETERMINATE
-    assert [m.content for m in history.messages] == ["interrupted"]
+    restarted = BoundStore(db_path, ManualClock())
+    new_boot = Services(restarted, model, boot_id="boot-after")
+    report = new_boot.coordinator.startup()
+    # The owning-process runtime of the earlier boot cannot exist while this process holds the
+    # exclusive guard (B4); restart alone, or a label, would not have been enough.
+    assert report.settled == 1 and report.still_unresolved == 0
+    run = restarted.get_history(owner, conversation.id).runs[0]
+    assert (
+        run.status is RunStatus.FAILED
+        and run.termination_basis is EvidenceBasis.PROCESS_EXIT_VERIFIED
+    )
+    assert [m.content for m in restarted.get_history(owner, conversation.id).messages] == [
+        "interrupted"
+    ]
     assert model.requests == []  # recovery never re-invokes the model
+    assert send(new_boot, owner, conversation.id, "new").assistant_message is not None
 
 
 def test_sqlite_error_type_never_leaks_through_storage_failures(

@@ -37,12 +37,13 @@ import pytest
 from anonymous.adapters.persistence.sqlite import store as store_module
 from anonymous.adapters.persistence.sqlite.connection import connect
 from anonymous.adapters.persistence.sqlite.store import SqliteStore
-from anonymous.application.context import ContextBuilder
-from anonymous.application.execution import ExecutionCoordinator
 from anonymous.application.ports.model import ModelIdentity, ModelOutput, ModelRequest
 from anonymous.application.ports.persistence import SubmissionOutcome
 from anonymous.domain.errors import StorageOutcomeUnknown
 from anonymous.domain.ids import ConversationId, SubmissionId, UserId, new_uuid
+from tests.conftest import Services
+from tests.dispatching import dispatch
+from tests.doubles import BoundStore
 
 T0 = datetime(2026, 10, 10, 9, 0, 0, tzinfo=UTC)
 
@@ -130,7 +131,7 @@ def test_user_instant_reflects_when_the_write_lock_was_won_not_when_the_request_
     """Delayed-commit fixture: the commit is delayed by lock contention, after the request began."""
     owner, cid = owner_and_conversation
     clock = ControlledClock()
-    store = SqliteStore(db_path, clock)
+    store = BoundStore(db_path, clock)
     blocker = _hold_write_lock(db_path)
     reads_before = clock.reads
 
@@ -155,9 +156,9 @@ def test_assistant_instant_reflects_publication_not_dispatch(
 ) -> None:
     owner, cid = owner_and_conversation
     clock = ControlledClock()
-    store = SqliteStore(db_path, clock)
+    store = BoundStore(db_path, clock)
     run = admit(store, owner, cid).run
-    store.record_dispatch(run.id, "model-x", "runtime-x")  # dispatched at T0
+    dispatch(store, run.id)  # dispatched at T0
     blocker = _hold_write_lock(db_path)
     reads_before = clock.reads
 
@@ -182,7 +183,7 @@ def test_assistant_instant_is_not_the_generation_start_or_the_user_commit(
 ) -> None:
     owner, cid = owner_and_conversation
     clock = ControlledClock()
-    store = SqliteStore(db_path, clock)
+    store = BoundStore(db_path, clock)
 
     class SlowModel:
         identity = ModelIdentity("slow-model", "slow-runtime")
@@ -191,7 +192,7 @@ def test_assistant_instant_is_not_the_generation_start_or_the_user_commit(
             clock.current += timedelta(minutes=30)  # generation takes half an hour
             return ModelOutput("late answer", self.identity)
 
-    outcome = ExecutionCoordinator(store, ContextBuilder(store), SlowModel()).submit(
+    outcome = Services(store, SlowModel()).coordinator.submit(
         owner=owner, conversation_id=cid, submission_id=SubmissionId(new_uuid()), content="q"
     )
     assert outcome.assistant_message is not None
@@ -210,17 +211,15 @@ def test_each_write_transaction_samples_the_clock_once_inside_itself(
     owner, cid = owner_and_conversation
     events: list[str] = []
     clock = ControlledClock(events)
-    store = SqliteStore(db_path, clock)
+    store = BoundStore(db_path, clock)
     real_connect = connect
     monkeypatch.setattr(
         store_module, "connect", lambda path: RecordingConnection(real_connect(path), events)
     )
 
-    outcome = ExecutionCoordinator(
-        store,
-        ContextBuilder(store),
-        _FixedModel(),
-    ).submit(owner=owner, conversation_id=cid, submission_id=SubmissionId(new_uuid()), content="q")
+    outcome = Services(store, _FixedModel()).coordinator.submit(
+        owner=owner, conversation_id=cid, submission_id=SubmissionId(new_uuid()), content="q"
+    )
     assert outcome.assistant_message is not None
 
     transactions: list[list[str]] = []
@@ -230,8 +229,12 @@ def test_each_write_transaction_samples_the_clock_once_inside_itself(
         if transactions:
             transactions[-1].append(event)
     writes = [t for t in transactions if "COMMIT" in t]
-    assert len(writes) == 3  # admission, dispatch, publication
-    for transaction in writes:
+    # admission, dispatch authorization (T3), handoff marker (T3b), handoff outcome (T3c),
+    # publication. T3b/T3c carry no instant and read no clock.
+    assert len(writes) == 5
+    sampling = [t for t in writes if "CLOCK" in t]
+    assert len(sampling) == 3  # admission, dispatch, publication
+    for transaction in sampling:
         assert transaction.count("CLOCK") == 1
         clock_at = transaction.index("CLOCK")
         first_write = min(
@@ -240,6 +243,7 @@ def test_each_write_transaction_samples_the_clock_once_inside_itself(
         assert (
             0 == transaction.index("BEGIN") < clock_at < first_write < transaction.index("COMMIT")
         )
+    assert all("CLOCK" not in t for t in writes if t not in sampling)
 
 
 def test_instant_is_read_before_the_commit_attempt_not_at_commit(
@@ -256,7 +260,7 @@ def test_instant_is_read_before_the_commit_attempt_not_at_commit(
     """
     owner, cid = owner_and_conversation
     clock = ControlledClock()
-    store = SqliteStore(db_path, clock)
+    store = BoundStore(db_path, clock)
     real_connect = connect
     commit_clock_values: list[datetime] = []
 
@@ -280,8 +284,8 @@ def test_instants_do_not_decrease_with_position_under_a_monotone_clock(
 ) -> None:
     owner, cid = owner_and_conversation
     clock = ControlledClock()
-    store = SqliteStore(db_path, clock)
-    coordinator = ExecutionCoordinator(store, ContextBuilder(store), _FixedModel())
+    store = BoundStore(db_path, clock)
+    coordinator = Services(store, _FixedModel()).coordinator
     for index in range(3):
         clock.current += timedelta(seconds=1)
         coordinator.submit(
@@ -349,7 +353,7 @@ def test_a_reading_taken_for_an_attempt_known_not_to_have_committed_is_not_retai
 ) -> None:
     owner, cid = owner_and_conversation
     clock = ControlledClock()
-    store = SqliteStore(db_path, clock)
+    store = BoundStore(db_path, clock)
     real_connect = connect
 
     with monkeypatch.context() as patch:
@@ -372,7 +376,7 @@ def test_uncertain_commit_that_was_durable_keeps_its_original_instant_on_reconci
 ) -> None:
     owner, cid = owner_and_conversation
     clock = ControlledClock()
-    store = SqliteStore(db_path, clock)
+    store = BoundStore(db_path, clock)
     submission = SubmissionId(new_uuid())
 
     def admit_with(sid: SubmissionId) -> SubmissionOutcome:
@@ -403,7 +407,7 @@ def test_uncertain_commit_that_did_not_persist_establishes_nothing_and_a_retry_s
 ) -> None:
     owner, cid = owner_and_conversation
     clock = ControlledClock()
-    store = SqliteStore(db_path, clock)
+    store = BoundStore(db_path, clock)
     submission = SubmissionId(new_uuid())
 
     def admit_with(sid: SubmissionId) -> SubmissionOutcome:
@@ -434,9 +438,9 @@ def test_uncertain_publication_that_was_durable_keeps_the_instant_it_was_sampled
 ) -> None:
     owner, cid = owner_and_conversation
     clock = ControlledClock()
-    store = SqliteStore(db_path, clock)
+    store = BoundStore(db_path, clock)
     run = admit(store, owner, cid).run
-    store.record_dispatch(run.id, "m", "r")
+    dispatch(store, run.id)
     clock.current = T0 + timedelta(minutes=3)
 
     with monkeypatch.context() as patch:

@@ -19,8 +19,9 @@ from fastapi.staticfiles import StaticFiles
 
 from anonymous.api import schemas
 from anonymous.api.guards import LocalOnlyGuard
-from anonymous.application.ports.model import ModelPort
+from anonymous.application.ports.model import RuntimePort, SynchronousModel
 from anonymous.application.ports.persistence import Clock
+from anonymous.application.supervisor import ExecutionSettings
 from anonymous.composition import Application, build_application
 from anonymous.config import Settings
 from anonymous.domain import errors
@@ -36,6 +37,13 @@ _STATUS_BY_CODE: dict[type[errors.AnonymousError], int] = {
     errors.ConversationBusy: 409,
     errors.IdempotencyConflict: 409,
     errors.RunStateConflict: 409,
+    errors.GenerationBlocked: 409,
+    errors.RuntimeQuarantined: 409,
+    errors.LegacyUnresolvedBlock: 409,
+    errors.ConfigurationUnavailable: 409,
+    errors.ConfigurationUnbound: 409,
+    errors.ExecutionUnresolved: 409,
+    errors.RetryNotEligible: 409,
     errors.StorageFailure: 503,
     errors.StorageOutcomeUnknown: 503,
 }
@@ -82,12 +90,26 @@ def health(application: AppDep) -> JSONResponse:
     )
     try:
         version = application.store.schema_version()
+        state = application.store.generation_state()
     except errors.AnonymousError:
         body = schemas.HealthDto(
             status="unavailable", schema_version=None, storage="unavailable", security=security
         )
         return JSONResponse(status_code=503, content=body.model_dump())
-    body = schemas.HealthDto(status="ok", schema_version=version, storage="ok", security=security)
+    reason = (
+        errors.LegacyUnresolvedBlock.code
+        if state.legacy_blockers
+        else (errors.RuntimeQuarantined.code if state.quarantined_runs else None)
+    )
+    generation = schemas.GenerationDto(
+        state="blocked" if reason else "open",
+        reason=reason,
+        legacy_unresolved_runs=len(state.legacy_blockers),
+        quarantined_runs=len(state.quarantined_runs),
+    )
+    body = schemas.HealthDto(
+        status="ok", schema_version=version, storage="ok", security=security, generation=generation
+    )
     return JSONResponse(content=body.model_dump())
 
 
@@ -132,25 +154,56 @@ def send_message(
     return schemas.submission_dto(body.submission_id, outcome)
 
 
+@router.post(
+    "/conversations/{conversation_id}/retry",
+    status_code=201,
+    response_model=schemas.SubmissionResultDto,
+)
+def retry_generation(
+    conversation_id: str,
+    body: schemas.RetryRequest,
+    response: Response,
+    application: AppDep,
+    owner: OwnerDep,
+) -> schemas.SubmissionResultDto:
+    """Explicit retry: a new attempt on the same saved user message; never a new message."""
+    outcome = application.conversations.retry_generation(
+        owner, conversation_id, body.retry_id, body.message_id
+    )
+    if outcome.replayed:
+        response.status_code = 200
+    return schemas.submission_dto(body.retry_id, outcome)
+
+
 def create_app(
     settings: Settings | None = None,
     *,
-    model: ModelPort | None = None,
+    model: SynchronousModel | None = None,
+    runtime: RuntimePort | None = None,
     clock: Clock | None = None,
+    execution_settings: ExecutionSettings | None = None,
 ) -> FastAPI:
     settings = settings or Settings.from_env()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        application = build_application(settings, model=model, clock=clock)
+        application = build_application(
+            settings,
+            model=model,
+            runtime=runtime,
+            clock=clock,
+            execution_settings=execution_settings,
+        )
         app.state.application = application
+        app.state.shutdown_incomplete = False
         try:
             yield
         finally:
-            application.shutdown()
+            # Ownership is released only if every worker ended; otherwise the process must exit.
+            app.state.shutdown_incomplete = not application.shutdown()
 
     app = FastAPI(
-        title="Anonymous (slice 0A — development, no authentication)",
+        title="Anonymous (slice 0B-1 — development, no authentication)",
         lifespan=lifespan,
         docs_url=None,
         redoc_url=None,

@@ -35,7 +35,7 @@ def error_code(response) -> str:  # type: ignore[no-untyped-def]
 
 def test_health_reports_readiness_and_the_missing_security_layer(client: TestClient) -> None:
     body = client.get("/api/v1/health").json()
-    assert body["status"] == "ok" and body["storage"] == "ok" and body["schema_version"] == 1
+    assert body["status"] == "ok" and body["storage"] == "ok" and body["schema_version"] == 2
     assert "no authentication" in body["security"]
 
 
@@ -210,7 +210,7 @@ def test_storage_unavailable_returns_503_with_guidance(client: TestClient, db_pa
     assert "same submission id" in response.json()["error"]["message"]
 
 
-# -- local-only guards and response hardening ---------------------------------------------------
+# -- local-only guards and response hardening ----------------------------------------------------
 
 
 def test_foreign_host_header_is_rejected(client: TestClient) -> None:

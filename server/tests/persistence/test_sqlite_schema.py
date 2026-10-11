@@ -17,7 +17,8 @@ NOW = "2026-01-01T12:00:00.000000Z"
 def seed_conversation(conn: sqlite3.Connection, owner: str) -> str:
     cid = new_uuid()
     conn.execute(
-        "INSERT INTO conversations (id, owner_user_id, title, created_at) VALUES (?, ?, NULL, ?)",
+        "INSERT INTO conversations (id, owner_user_id, title, created_at, record_epoch)"
+        " VALUES (?, ?, NULL, ?, '0b')",
         (cid, owner, NOW),
     )
     return cid
@@ -33,19 +34,47 @@ def insert_user_message(conn: sqlite3.Connection, cid: str, position: int = 1) -
     return mid
 
 
+_BIND = (
+    "slot_id='slot-1', execution_boot_id='boot-x', binding_format='scripted/1',"
+    " binding_adapter_id='a', binding_adapter_version='1', binding_instance_ref='i-1',"
+    " binding_declared_bases='runtime_reported_terminal', binding_lifetime_scope='owning_process',"
+    " binding_late_delivery_excluded=1, configuration_digest=?, provenance_json='{}'"
+)
+
+
+def default_digest(conn: sqlite3.Connection) -> str:
+    return str(conn.execute("SELECT digest FROM effective_configurations").fetchone()[0])
+
+
 def insert_run(conn: sqlite3.Connection, cid: str, mid: str, status: str = "pending") -> str:
+    """A pending run, optionally taken through T3 (and T3b for ``in_flight``) by raw SQL."""
     rid = new_uuid()
-    extra = ""
-    if status == "in_flight":
-        extra = f", model_id='m', runtime_id='r', dispatched_at='{NOW}'"
     conn.execute(
-        "INSERT INTO model_runs (id, conversation_id, triggering_message_id, status, requested_at)"
-        " VALUES (?, ?, ?, 'pending', ?)",
+        "INSERT INTO model_runs (id, conversation_id, triggering_message_id, status, requested_at,"
+        " record_epoch) VALUES (?, ?, ?, 'pending', ?, '0b')",
         (rid, cid, mid, NOW),
     )
     if status == "in_flight":
-        conn.execute(f"UPDATE model_runs SET status='in_flight'{extra} WHERE id=?", (rid,))
+        conn.execute(
+            "UPDATE model_runs SET status='in_flight', model_id='m', runtime_id='r',"
+            f" dispatched_at='{NOW}', handoff='NONE', {_BIND}, state_version=state_version+1"
+            " WHERE id=?",
+            (default_digest(conn), rid),
+        )
+        conn.execute(
+            "UPDATE model_runs SET handoff='STARTED', state_version=state_version+1 WHERE id=?",
+            (rid,),
+        )
     return rid
+
+
+def fail_pending(conn: sqlite3.Connection, rid: str) -> None:
+    conn.execute(
+        "UPDATE model_runs SET status='failed', failure_code='x', settled_at=?,"
+        " termination_basis='never_dispatched', completion_observed='no',"
+        " state_version=state_version+1 WHERE id=?",
+        (NOW, rid),
+    )
 
 
 def test_every_connection_enforces_foreign_keys(db_path: Path, store: SqliteStore) -> None:
@@ -140,13 +169,13 @@ def test_assistant_message_requires_in_flight_run_and_user_message_forbids_one(
             )
 
         # BEFORE INSERT triggers fire ahead of CHECKs, so either guard may report the rejection.
-        with pytest.raises(sqlite3.IntegrityError, match=r"CHECK|in-flight"):
+        with pytest.raises(sqlite3.IntegrityError, match=r"CHECK|in-flight|open, started"):
             assistant(2, None)  # assistant without run
         with pytest.raises(sqlite3.IntegrityError, match="CHECK"):
             assistant(2, pending, role="user")  # user message claiming a run
-        with pytest.raises(sqlite3.IntegrityError, match="in-flight"):
+        with pytest.raises(sqlite3.IntegrityError, match="open, started"):
             assistant(2, pending)  # run not dispatched
-        with pytest.raises(sqlite3.IntegrityError, match=r"FOREIGN KEY|in-flight"):
+        with pytest.raises(sqlite3.IntegrityError, match=r"FOREIGN KEY|open, started"):
             assistant(2, new_uuid())  # nonexistent run
     finally:
         conn.close()
@@ -162,7 +191,9 @@ def test_one_response_per_run_and_success_requires_response(
         rid = insert_run(conn, cid, mid, "in_flight")
         with pytest.raises(sqlite3.IntegrityError, match="requires its assistant message"):
             conn.execute(
-                "UPDATE model_runs SET status='succeeded', settled_at=? WHERE id=?", (NOW, rid)
+                "UPDATE model_runs SET status='succeeded', settled_at=?,"
+                " state_version=state_version+1 WHERE id=?",
+                (NOW, rid),
             )
         conn.execute(
             "INSERT INTO messages (id, conversation_id, position, role, content, committed_at,"
@@ -190,10 +221,7 @@ def test_at_most_one_unsettled_run_per_conversation(
         run = insert_run(conn, cid, first)
         with pytest.raises(sqlite3.IntegrityError, match="UNIQUE"):
             insert_run(conn, cid, second)
-        conn.execute(
-            "UPDATE model_runs SET status='failed', failure_code='x', settled_at=? WHERE id=?",
-            (NOW, run),
-        )
+        fail_pending(conn, run)
         insert_run(conn, cid, second)  # allowed once the first is settled
     finally:
         conn.close()
@@ -208,13 +236,18 @@ def test_settled_runs_and_run_identity_are_immutable(
         mid = insert_user_message(conn, cid)
         rid = insert_run(conn, cid, mid)
         with pytest.raises(sqlite3.IntegrityError, match="identity is immutable"):
-            conn.execute("UPDATE model_runs SET triggering_message_id = ? WHERE id = ?", (mid, rid))
-        conn.execute(
-            "UPDATE model_runs SET status='failed', failure_code='x', settled_at=? WHERE id=?",
-            (NOW, rid),
-        )
+            conn.execute(
+                "UPDATE model_runs SET triggering_message_id = ?, state_version=state_version+1"
+                " WHERE id = ?",
+                (mid, rid),
+            )
+        fail_pending(conn, rid)
         with pytest.raises(sqlite3.IntegrityError, match="settled runs are immutable"):
-            conn.execute("UPDATE model_runs SET failure_code = 'y' WHERE id = ?", (rid,))
+            conn.execute(
+                "UPDATE model_runs SET failure_code = 'y', state_version=state_version+1"
+                " WHERE id = ?",
+                (rid,),
+            )
         with pytest.raises(sqlite3.IntegrityError, match="cannot be deleted"):
             conn.execute("DELETE FROM model_runs WHERE id = ?", (rid,))
     finally:
@@ -229,10 +262,18 @@ def test_run_state_consistency_checks(db_path: Path, owner: UserId, store: Sqlit
         rid = insert_run(conn, cid, mid)
         with pytest.raises(sqlite3.IntegrityError, match="CHECK"):  # failed needs a code
             conn.execute(
-                "UPDATE model_runs SET status='failed', settled_at=? WHERE id=?", (NOW, rid)
+                "UPDATE model_runs SET status='failed', settled_at=?,"
+                " termination_basis='never_dispatched', completion_observed='no',"
+                " state_version=state_version+1 WHERE id=?",
+                (NOW, rid),
             )
         with pytest.raises(sqlite3.IntegrityError, match="CHECK"):  # in_flight needs identities
-            conn.execute("UPDATE model_runs SET status='in_flight' WHERE id=?", (rid,))
+            conn.execute(
+                "UPDATE model_runs SET status='in_flight', handoff='NONE', "
+                + _BIND
+                + ", state_version=state_version+1 WHERE id=?",
+                (default_digest(conn), rid),
+            )
     finally:
         conn.close()
 
@@ -242,7 +283,8 @@ def test_timestamp_encoding_is_enforced(db_path: Path, owner: UserId, store: Sql
     try:
         with pytest.raises(sqlite3.IntegrityError, match="CHECK"):
             conn.execute(
-                "INSERT INTO conversations (id, owner_user_id, created_at) VALUES (?, ?, ?)",
+                "INSERT INTO conversations (id, owner_user_id, created_at, record_epoch)"
+                " VALUES (?, ?, ?, '0b')",
                 (new_uuid(), owner, "yesterday"),
             )
     finally:

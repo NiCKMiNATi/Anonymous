@@ -8,7 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from anonymous.api.app import create_app
-from anonymous.application.ports.model import ModelPort
+from anonymous.application.ports.model import SynchronousModel
 from anonymous.application.ports.persistence import Clock
 from anonymous.config import Settings
 from tests.doubles import ManualClock
@@ -20,7 +20,7 @@ BASE_URL = "http://127.0.0.1:8000"
 def open_client(
     db_path: Path,
     *,
-    model: ModelPort | None = None,
+    model: SynchronousModel | None = None,
     clock: Clock | None = None,
     client_dist: Path | None = None,
 ) -> Iterator[TestClient]:

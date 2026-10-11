@@ -1,7 +1,7 @@
 [project]
 name = "anonymous-server"
 version = "0.0.1"
-description = "Anonymous server — Vertical Slice 0A (development only; no authentication)"
+description = "Anonymous server — Slice 0B-1 (development only; no authentication; scripted runtime)"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.115",

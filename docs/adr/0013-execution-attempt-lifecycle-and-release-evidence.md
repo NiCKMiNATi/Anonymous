@@ -1,0 +1,76 @@
+# ADR-0013 — Execution attempt lifecycle, release evidence, slot ownership, invocation handoff and publication fencing
+
+**Status: Proposed (revision 3.1).** Revision 1 was recorded as "Accepted for Slice 0B planning" on author review only; an independent review returned **BLOCKED** (seven findings). Revision 2 was again returned **BLOCKED**: its F4 (runtime control), F6 (provenance) and F7 (publication recovery) were found resolved, and five corrections remained (identity mismatch, invocation versus closure, multiple legacy unresolved executions, legacy configuration baseline, the T7 predicate). Revision 3 makes those corrections. The status stays **Proposed** until the revised design receives independent review and the owner confirms; Claude's own checks are not independent acceptance. Resolves, on paper only, the *design* part of LD-04 / review finding R6; runtime-specific mechanisms remain gated by runtime evidence.
+**Date:** 2026-10-11 (revision 3).
+
+## Context
+
+The accepted logical model (data model §§8–12, CB-03–CB-06, LM-04–LM-07; architecture §§8–9; V0-D03/D04/D06) fixes *what* must be true: model output is not history until atomically published; uncertain execution must not be retried or released by guesswork; marking failure alone cannot release admission while old work may still run (CB-05); one generation is active per conversation and survives restart. It leaves the mechanisms open (LD-04). The 0A synchronous fake-model port cannot carry a real runtime.
+
+Revision 1 proposed mechanisms; the first review found: (F1) an unverified operator attestation could release admission while old work continued; (F2) closure and publication were not ordered by an authoritative mechanism; (F3) one "gate" conflated pending admission, runtime ownership and quarantine; (F4) the port could not route later control to the original runtime instance; (F5) NFR-08 needed a conversation-level configuration binding (see ADR-0014); (F6) labels were treated as identities (ADR-0014); (F7) uncertain publication recovery released admission on restart without evidence. The second review accepted F4, F6 and F7 as resolved and found: (R3-F1) `runtime_identity_mismatch` was listed as termination evidence although output from a different instance proves nothing about the bound execution; (R3-F2) a supervisor could check that closure had not occurred, pause, and invoke the runtime after closure committed — the durable arbiter orders publication against closure but cannot order an *external* handoff; (R3-F3) the 0A schema permits unresolved runs in several conversations and the single-slot model did not say how they are represented; (R3-F5) legacy conversations were bound to a baseline checked only against another new implementation; (R3-T7) settlement was conditioned on `in_flight`, so T7 from `indeterminate` was unsatisfiable.
+
+## Retained from accepted sources (unchanged)
+
+CB-05; LM-06; LM-07; V0-D04 (retry only after settled failure, no automatic retry, no silent queue); FR-15; the database guarantees of 0A (immutable messages, one unsettled run per conversation, assistant message requires an in-flight run). This ADR adds mechanism and weakens none of them.
+
+## Implementation status (Slice 0B-1)
+
+Implemented for 0B-1 against a **scripted, in-process runtime only** (see the [implementation record](../implementation/slice-0b-1.md)): arbiter predicates and triggers, handoff gate and marker, slot ownership by run, quarantine, closure/stop/verification, T7 reconciliation, legacy blockers, explicit retry, shutdown and ownership. The ADR **stays Proposed**: no external runtime evidence exists, and the implementation has not had independent review.
+
+## Alternatives considered
+
+- **Operator attestation as release (revision 1).** Rejected: a human statement is not verification; a wrong statement admits conflicting work while old work runs (violates CB-05).
+- **Force-release option for the owner.** Not proposed. It would explicitly weaken CB-05 and needs its own ADR if wanted.
+- **Rely on `in_flight` status and the assistant-publication trigger for race safety.** Rejected: neither sees closure; publication after a stop decision would still be possible.
+- **Rely on the durable fence alone to prevent invocation after closure.** Rejected (rev 3): a check-then-act race remains between the check and the external call; an external runtime cannot join a database commit. Needs in-process exclusion plus a durable marker that closure cannot overtake.
+- **Hold a database transaction open across the handoff or generation.** Rejected: unbounded write-lock duration and still not atomic with the runtime.
+- **Treat a different instance's output as proof the original ended.** Rejected: it says nothing about the bound execution.
+- **Assign legacy unresolved runs to the single slot, or ignore them for lack of slot records.** Rejected: the first violates slot uniqueness or fabricates ownership; the second allows dispatch over a possibly active old execution.
+- **Resolve legacy rows because their `runtime_id` label names an in-process adapter.** Rejected: a label is not an identity (ADR-0014).
+- **Bind legacy conversations in the migration after comparing two new implementations.** Rejected: proves nothing about 0A.
+- **Hold the generation gate from `pending`.** Rejected: a queued run would own the runtime resource it has not used and quarantine could not be distinguished.
+- **Separate durable slot table.** Possible, but ownership derived from run rows plus a uniqueness guarantee is simpler, atomic with dispatch and reconstructible after restart.
+- **Persist observed output before publication.** Rejected: second copy of private text; a further uncertain write; not required by V0-D03.
+- **Background polling reconciler.** Rejected for V0: extra always-on component.
+- **Automatic retry / retry from `indeterminate`.** Prohibited (V0-D04) / risks a second concurrent execution.
+
+## Revision 3.1 — final 0B-1 corrections (2026-10-11)
+
+Made before implementing 0B-1 against a controlled, scripted, in-process runtime; external transport, brokers, queued delivery and surviving launchers remain 0B-2 evidence gates and are **not** claimed safe here.
+
+- **`isolation_verified` (B6) and scope-wide/snapshot absence are removed** as release evidence. Five bases remain (B1–B5).
+- **Single-process ownership is enforced:** canonical, validated dataset identity; the guard is held until every supervised worker has terminated or the process dies; a hung shutdown never releases it; no second process can reconcile while an old worker could resume. For a binding recorded with `lifetime_scope = owning_process`, a later boot's exclusive guard is positive evidence (B4) that the previous worker threads are gone.
+- **Legacy settlement through an adapter's declared lifetime is withdrawn.** Legacy unresolved runs stay quarantined unless valid evidence resolves them; none exists in 0B-1. 0B-1 execution tests use a separate clean development database.
+- F1, F4, F5, F6, F7 and T7 rules are unchanged. The ADR stays **Proposed** until implementation results and a final review justify acceptance.
+
+## Decision (revised proposal, revision 3)
+
+1. **Statuses, fence and handoff marker.** Keep five stored statuses. Add a durable, irreversible **closure fence** and a durable **handoff marker** (`NONE → STARTED`, once) with a recorded outcome (`NOT_CALLED`, `NOT_STARTED`, `ACCEPTED`, `UNKNOWN`) on `in_flight` runs. Publication requires `in_flight`, an open fence and `STARTED`. Every non-success exit passes through the fence, in a separate write or in the same write as settlement.
+2. **Two ordering problems.** *A. Publication versus closure* is decided by the **arbiter**: conditional writes on the same run record, each with **its own source predicate** (T3, T3b, T3c, T4, T5c, T5, T6, T7 — T7's source is `indeterminate`, not `in_flight`), atomic and serial per run, with a `state_version` guarding actors that act on state they did not write. First commit wins; stop is sent only after closure is durable. *B. External invocation handoff versus closure* is decided by an application-owned **handoff gate** (per-run, in-process mutual exclusion) held by the invoker from before T3b until the start acknowledgment is recorded, and required by every in-process closer. `generate` is split into `start` (bounded, returns `ACCEPTED`/`NOT_STARTED`/`UNKNOWN`) and `await_result`; the invocation right is single-use. Consequence (proved by case analysis and checked by exhaustive interleaving): no call to `start` is initiated after a closure commits. If publication wins, message and `succeeded` commit together and nothing may undo them; if closure wins, publication is prohibited, late output is provisional and discarded, and the attempt is never invoked again. No database transaction is held during `start`, `await_result`, `stop` or `probe`; no atomicity with external side effects is claimed. The existing trigger is a backstop that must be extended to require an open fence, `STARTED` and a non-legacy run.
+3. **Five concerns.** (A) conversation admission, (B) execution slot ownership, (C) quarantine of an unresolved execution, (D) other conversation restrictions and (E) legacy unresolved-execution blockers are distinct. A `pending` run holds only A.
+4. **Slot ownership.** The slot is claimed atomically with dispatch (T3), is owned by the run, is held exactly while the run is `in_flight` or `indeterminate`, is released only inside a settlement that has an admissible basis, and is reconstructed from run rows after restart. Reconciliation acts on the owner run and never acquires the slot. While an `indeterminate` run holds the slot, all new generation is refused visibly; reading continues.
+5. **Release evidence.** A run is settled `failed` only on one of five enumerated, machine-verifiable bases: `never_dispatched`, `adapter_never_reached`, `runtime_reported_terminal`, `process_exit_verified`, `execution_terminated_verified` (`isolation_verified` is removed for 0B-1), and only a basis **admissible for the durable handoff state** (e.g. `never_dispatched` only if `start` provably never ran; after an `UNKNOWN` handoff `execution_terminated_verified` is insufficient unless the binding declares `late_delivery_excluded`). Sending a stop command, a timeout, lost connection, restart, elapsed time, a human statement, label equality, **or any output from a runtime instance other than the bound one** is never evidence. If no basis can be obtained the run stays `indeterminate` and the slot stays quarantined. **Operator attestation and the revision-1 "idle under exclusive use" basis are removed; revision 2's `runtime_identity_mismatch` basis is withdrawn.** A model-identity mismatch from the *verified bound instance* is distinct: the instance's delivery ends the attempt (`runtime_reported_terminal`) and only the output is rejected.
+6. **Binding and control.** Dispatch durably records a binding that identifies the runtime instance and adapter format. `prepare`, `start`, `await_result`, `stop` and `probe` carry it; control is bounded, independent of a blocked generation, instance-exact (a mismatch touches nothing), routed by the **persisted** binding's format and never redirected to whichever instance is currently active, and `UNSUPPORTED`/`INSTANCE_MISMATCH` keep a run unresolved. The adapter honors a stop-before-start tombstone and initiates no transmission after `start` returns. Domain logic depends on none of this being llama.cpp-specific.
+7. **Legacy executions.** Runs that predate the 0B schema keep every original fact; migration changes no status and writes no fence, handoff, binding, slot or provenance. Unresolved ones are class E blockers: a derived global startup quarantine blocks all dispatch while any exists, without any slot record; **no admissible basis exists for them in 0B-1** (the store refuses their settlement), so they stay quarantined until a later evidence producer exists. Migration **stops safely** (rollback, dataset unchanged, no readiness) on structural inconsistency, and does **not** stop on unresolved executions.
+8. **Uncertain publication** (unchanged from revision 2). Cases: A committed (preserve success, original identity and instant); B absent (requires a closed fence; settle only with termination or non-invocation evidence); C undetermined (remain unresolved, reconcile first). A transport outage or restart alone proves nothing.
+9. **Retry and supervision.** Carried over: explicit retry creates a new run on the same saved user message with an owner-scoped intent id, never automatically, never from `indeterminate`; supervisors are independent of the request; reconcile triggers are startup, touching requests and an explicit command, with no polling loop.
+
+## Consequences
+
+- Safety against double execution and false release rests on adapter evidence. A runtime that exposes no verifiable termination or process identity yields quarantine, which blocks **all** generation (single slot) until verified. This is a deliberate availability cost (owner-facing; design §6.5, O1).
+- Late output can be lost when the fence closes first; the user retries explicitly (O4).
+- Each dispatch adds one short durable write (T3b) and one best-effort write (T3c) and splits `generate` (O6).
+- Existing 0A datasets with unresolved runs cannot dispatch under 0B-1 until those runs are settled by verified evidence (O5).
+- **Unresolved cases, not asserted safe (design §4.7):** U-1 delayed delivery after an `UNKNOWN` handoff (contained by quarantine and restricted evidence); U-2 a hung handoff (closure is not committed; recovery by restart); U-3 dependence on a single Anonymous process (assumption A-1; the development `InstanceGuard` does not satisfy ADR-0011).
+- While quarantined or configuration-blocked, sends are refused before a user message is saved (O3).
+- New immutable facts and conditional writes are needed (fence, slot, binding, retry intents); migrations must not backfill unknown values.
+- Windows behavior of process identity and exit verification is unmeasured (`BLOCKED_BY_RUNTIME_EVIDENCE` / `REQUIRED_BEFORE_FULL_V0`).
+- Submission fencing stays a documented limitation for 0B and is required before full V0 unless the owner accepts it.
+
+## Matters requiring later runtime evidence
+
+Whether a runtime serves `stop`/`probe` during generation; per-attempt registration guarantees; whether `start` can be bounded and can abandon sends, and whether late delivery after an `UNKNOWN` handoff can be excluded; instance and process identity and exit verification (Mac and Windows); reliable idle or per-attempt status; requester-disconnect behavior; `finish_reason`, faithful input and version/artifact-digest reporting; the existence of any legacy-capable evidence producer. Until measured, only scripted adapters may claim bases B3–B6.
+
+## Affected documents
+
+[LD-04 design](../design/ld-04-execution-lifecycle.md) (§§4–5, 9); [data model](../05-data-model.md) §§8, 15; [architecture](../04-architecture.md) §§8–9; [V0 scope](../03-v0-scope.md) V0-D03/D04/D06; ADR-0003, 0004, 0006, 0011; [slice 0A notes](../implementation/slice-0a.md); [ExecPlan](../../.agent/plans/2026-10-11-ld-04-lifecycle-and-continuity.md). No accepted ADR is superseded; FR-15 is unchanged.

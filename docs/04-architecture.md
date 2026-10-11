@@ -262,6 +262,7 @@ The matrix assigns every selected RB subset an owner. Applicability and subset m
 | NFR-05 | REQUIRED_V0 | C01/C02: Windows/Mac core and iPhone essential interactions, including create and bounded accessibility checks. |
 | NFR-06 | REQUIRED_V0 | C07/C08/C10: existing hardware/no required new paid infrastructure; benchmark envelope still gated. |
 | NFR-07 | REQUIRED_V0 | C03–C10: cohesive responsibilities with inward contract dependencies. |
+| NFR-08 | PARTIAL_V0 | C05/C06/C07/C08/C10: per-run provenance (label, verifiable identity, verification state) recorded at dispatch for application, model, runtime, context and behavior configuration; persisted conversation configuration binding; migrations preserve data; broader configuration versioning deferred (ADR-0014, proposed). |
 | SEC-01 | REQUIRED_V0 | C02/C03: application authentication independent of network presence. |
 | SEC-02 | REQUIRED_V0 | C02/C03/C04/C05: operation/resource checks and current delivery authorization. |
 | SEC-03 | REQUIRED_V0 | C03/C08: stable device trust across ordinary address changes. |
@@ -285,7 +286,7 @@ The matrix assigns every selected RB subset an owner. Applicability and subset m
 | REC-04 | PARTIAL_V0 | C01/C02/C03/C05/C06/C08: visible context/history/access-policy failures without false success. |
 | REC-05 | PARTIAL_V0 | C05/C06/C08: reconstruct transient context without sacrificing sources; no derived subsystem rebuild. |
 
-Inventory: **37 selected subsets = 26 REQUIRED_V0 + 11 PARTIAL_V0**. Remaining **11 DEFERRED** IDs are FR-04, FR-05, FR-06, FR-07, FR-10, FR-11, FR-13, DATA-04, DATA-06, DATA-09, REC-06. The **4 NOT_APPLICABLE_V0** IDs are SEC-07, PRIV-02, PRIV-06, DATA-10. Section 10 preserves their relevant constraints without adding features; exclusion checks remain V0-AC-01/07/09.
+Inventory: **38 selected subsets = 26 REQUIRED_V0 + 12 PARTIAL_V0** (NFR-08 added 2026-10-11; previously 37 = 26 + 11). Remaining **11 DEFERRED** IDs are FR-04, FR-05, FR-06, FR-07, FR-10, FR-11, FR-13, DATA-04, DATA-06, DATA-09, REC-06. The **4 NOT_APPLICABLE_V0** IDs are SEC-07, PRIV-02, PRIV-06, DATA-10. Section 10 preserves their relevant constraints without adding features; exclusion checks remain V0-AC-01/07/09.
 
 | Release scenario | Architectural home and key checkpoint | Evidence still required |
 | --- | --- | --- |

@@ -94,6 +94,8 @@ def migrate(db_path: str | Path, migrations: list[Migration] | None = None) -> i
             logger.info("applied migration %04d_%s", migration.version, migration.name)
         return len(known)
     except sqlite3.Error as error:
+        # The message names only a violated constraint or trigger rule (never row content).
+        logger.error("migration failed and was rolled back: %s", error)
         raise StorageFailure("Database migration failed.") from error
     finally:
         conn.close()

@@ -60,6 +60,10 @@ def test_run_transitions() -> None:
     assert can_transition(RunStatus.IN_FLIGHT, RunStatus.SUCCEEDED)
     assert can_transition(RunStatus.IN_FLIGHT, RunStatus.INDETERMINATE)
     assert not can_transition(RunStatus.PENDING, RunStatus.SUCCEEDED)  # never skips dispatch
-    for terminal in (RunStatus.SUCCEEDED, RunStatus.FAILED, RunStatus.INDETERMINATE):
+    for terminal in (RunStatus.SUCCEEDED, RunStatus.FAILED):
         for target in RunStatus:
             assert not can_transition(terminal, target)
+    # T7: an indeterminate run may only be settled failed (on evidence); never resumed or succeeded.
+    assert can_transition(RunStatus.INDETERMINATE, RunStatus.FAILED)
+    for target in (RunStatus.PENDING, RunStatus.IN_FLIGHT, RunStatus.SUCCEEDED):
+        assert not can_transition(RunStatus.INDETERMINATE, target)

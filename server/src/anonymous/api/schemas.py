@@ -51,6 +51,16 @@ class RunDto(BaseModel):
     runtime_id: str | None
     failure_code: str | None
     failure_message: str | None
+    kind: Literal["initial", "retry"] = "initial"
+    retry_of_run_id: str | None = None
+    termination_basis: str | None = None
+    completion_observed: str | None = None
+
+
+class RetryRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    retry_id: str
+    message_id: str
 
 
 class ConversationDetailDto(BaseModel):
@@ -67,11 +77,19 @@ class SubmissionResultDto(BaseModel):
     assistant_message: MessageDto | None
 
 
+class GenerationDto(BaseModel):
+    state: Literal["open", "blocked"]
+    reason: str | None = None
+    legacy_unresolved_runs: int = 0
+    quarantined_runs: int = 0
+
+
 class HealthDto(BaseModel):
     status: Literal["ok", "unavailable"]
     schema_version: int | None
     storage: Literal["ok", "unavailable"]
     security: str
+    generation: GenerationDto | None = None
 
 
 def conversation_dto(c: Conversation) -> ConversationDto:
@@ -98,6 +116,10 @@ def run_dto(r: ModelRun) -> RunDto:
         runtime_id=r.runtime_id,
         failure_code=r.failure_code,
         failure_message=r.failure_message,
+        kind=r.kind.value,
+        retry_of_run_id=r.retry_of_run_id,
+        termination_basis=r.termination_basis.value if r.termination_basis else None,
+        completion_observed=r.completion_observed.value if r.completion_observed else None,
     )
 
 

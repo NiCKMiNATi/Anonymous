@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import sys
 from dataclasses import replace
 from pathlib import Path
@@ -62,13 +63,20 @@ def main(argv: list[str] | None = None) -> int:
         settings.client_dist if settings.client_dist else "not built (use the Vite dev server)",
     )
 
+    app = create_app(settings)
     uvicorn.run(
-        create_app(settings),
+        app,
         host=settings.host,
         port=settings.port,
         log_level="info",
         access_log=False,  # request paths contain private object ids; keep them out of logs
     )
+    if getattr(app.state, "shutdown_incomplete", False):
+        # A supervised worker is still alive (hung runtime). Ownership of the dataset was NOT
+        # released; the process must die so the OS releases the lock together with the worker.
+        log.error("shutdown incomplete; terminating the process to end the remaining worker")
+        logging.shutdown()
+        os._exit(70)
     return 0
 
 

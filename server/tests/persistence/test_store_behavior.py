@@ -9,16 +9,13 @@ from pathlib import Path
 import pytest
 
 from anonymous.adapters.persistence.sqlite.store import SqliteStore
-from anonymous.application.ports.persistence import SubmissionOutcome
-from anonymous.domain.errors import (
-    ConversationBusy,
-    ConversationNotFound,
-    IdempotencyConflict,
-    RunStateConflict,
-)
+from anonymous.application.ports.persistence import SubmissionOutcome, WriteResult
+from anonymous.domain.errors import ConversationBusy, ConversationNotFound, IdempotencyConflict
+from anonymous.domain.evidence import ClosureReason, CompletionObserved, EvidenceBasis, Handoff
 from anonymous.domain.ids import ConversationId, SubmissionId, UserId, new_uuid
 from anonymous.domain.models import MessageRole, RunStatus
-from tests.doubles import ManualClock
+from tests.dispatching import BOOT, authorize, dispatch, record
+from tests.doubles import BoundStore, ManualClock
 
 
 def digest(text: str) -> str:
@@ -117,22 +114,36 @@ def test_dispatch_publish_and_settle_state_machine(store: SqliteStore, owner: Us
     conversation = store.create_conversation(owner, None)
     admitted = admit(store, owner, conversation.id)
     run_id = admitted.run.id
-    with pytest.raises(RunStateConflict):
-        store.publish_response(run_id, "too early")  # never dispatched
-    dispatched = store.record_dispatch(run_id, "m", "r")
-    assert dispatched.status is RunStatus.IN_FLIGHT
-    assert (dispatched.model_id, dispatched.runtime_id) == ("m", "r")
-    with pytest.raises(RunStateConflict):
-        store.record_dispatch(run_id, "m", "r")  # cannot dispatch twice
+    early = store.publish_response(run_id, "too early")  # never dispatched
+    assert early.result is WriteResult.WRONG_SOURCE and early.published is None
+    authorized = authorize(store, run_id)
+    assert authorized.status is RunStatus.IN_FLIGHT and authorized.handoff is Handoff.NONE
+    assert (authorized.model_id, authorized.runtime_id) == ("m", "r")
+    assert store.authorize_dispatch(run_id, record()).result is WriteResult.WRONG_SOURCE
+    # Publication needs a started handoff (T3b), not just an authorization (T3).
+    assert store.publish_response(run_id, "no handoff").result is WriteResult.WRONG_SOURCE
+    assert store.mark_handoff_started(run_id, BOOT).result is WriteResult.APPLIED
+    assert store.mark_handoff_started(run_id, BOOT).result is WriteResult.ALREADY_STARTED
     published = store.publish_response(run_id, "answer")
-    assert published.run.status is RunStatus.SUCCEEDED
-    assert published.message.role is MessageRole.ASSISTANT
-    assert published.message.position == 2
-    assert published.message.produced_by_run_id == run_id
-    with pytest.raises(RunStateConflict):
-        store.publish_response(run_id, "second answer")  # one response per run
-    with pytest.raises(RunStateConflict):
-        store.settle_failed(run_id, "x", "y")  # settled runs stay settled
+    assert published.result is WriteResult.APPLIED and published.published is not None
+    assert published.published.run.status is RunStatus.SUCCEEDED
+    assert published.published.message.role is MessageRole.ASSISTANT
+    assert published.published.message.position == 2
+    assert published.published.message.produced_by_run_id == run_id
+    again = store.publish_response(run_id, "second answer")  # one response per run
+    assert again.result is WriteResult.PUBLISHED
+    assert again.published is not None and again.published.message.content == "answer"
+    closed = store.close_run(run_id, ClosureReason.DEADLINE)
+    assert closed.result is WriteResult.PUBLISHED  # closure cannot undo a committed result
+    settled = store.settle_in_flight(
+        run_id,
+        basis=EvidenceBasis.RUNTIME_REPORTED_TERMINAL,
+        code="x",
+        message="y",
+        completion=CompletionObserved.UNKNOWN,
+        reason=ClosureReason.DEADLINE,
+    )
+    assert settled.result is WriteResult.PUBLISHED  # settled runs stay settled
     history = store.get_history(owner, conversation.id)
     assert [m.content for m in history.messages] == ["hello", "answer"]
 
@@ -142,7 +153,7 @@ def test_publish_is_atomic_when_the_run_update_fails(
 ) -> None:
     conversation = store.create_conversation(owner, None)
     run = admit(store, owner, conversation.id).run
-    store.record_dispatch(run.id, "m", "r")
+    dispatch(store, run.id)
     # Break the second statement of publication: an extra trigger aborts the run update.
     conn = sqlite3.connect(db_path)
     conn.execute(
@@ -161,8 +172,10 @@ def test_publish_is_atomic_when_the_run_update_fails(
 def test_failed_settlement_commits_no_message(store: SqliteStore, owner: UserId) -> None:
     conversation = store.create_conversation(owner, None)
     run = admit(store, owner, conversation.id).run
-    failed = store.settle_failed(run.id, "never_dispatched", "msg")
-    assert failed.status is RunStatus.FAILED and failed.model_id is None
+    failed = store.settle_pending(run.id, "never_dispatched", "msg")
+    assert failed.result is WriteResult.APPLIED
+    assert failed.run.status is RunStatus.FAILED and failed.run.model_id is None
+    assert failed.run.termination_basis is EvidenceBasis.NEVER_DISPATCHED
     assert len(store.get_history(owner, conversation.id).messages) == 1
     admit(store, owner, conversation.id, "next")  # admission released
 
@@ -174,43 +187,48 @@ def test_positions_are_assigned_in_commit_order_not_by_time(db_path: Path, owner
 
     # Equal, then decreasing instants.
     clock = SequenceClock([START, START, START - timedelta(hours=5)])
-    store = SqliteStore(db_path, clock)
+    store = BoundStore(db_path, clock)
     conversation = store.create_conversation(owner, None)  # consumes START
     first = admit(store, owner, conversation.id, "q")  # consumes START
-    store.record_dispatch(first.run.id, "m", "r")  # consumes the earlier instant (dispatch time)
-    answer = store.publish_response(first.run.id, "a")
+    dispatch(store, first.run.id)  # consumes the earlier instant (dispatch time)
+    answer = store.publish_response(first.run.id, "a").published
+    assert answer is not None
     assert [m.position for m in store.get_history(owner, conversation.id).messages] == [1, 2]
     assert answer.message.committed_at < first.user_message.committed_at
     ordered = store.get_history(owner, conversation.id).messages
     assert [m.role for m in ordered] == [MessageRole.USER, MessageRole.ASSISTANT]
 
 
-def test_recover_unsettled_runs(store: SqliteStore, owner: UserId) -> None:
+def test_recover_pending_runs_settles_only_never_dispatched_work(
+    store: SqliteStore, owner: UserId
+) -> None:
     pending_conv = store.create_conversation(owner, None)
     flight_conv = store.create_conversation(owner, None)
     done_conv = store.create_conversation(owner, None)
     pending = admit(store, owner, pending_conv.id).run
     in_flight = admit(store, owner, flight_conv.id).run
-    store.record_dispatch(in_flight.id, "m", "r")
+    dispatch(store, in_flight.id, slot="slot-a")
     done = admit(store, owner, done_conv.id).run
-    store.record_dispatch(done.id, "m", "r")
+    dispatch(store, done.id, slot="slot-b")
     store.publish_response(done.id, "ok")
 
-    report = store.recover_unsettled_runs()
-    assert (report.settled_failed, report.marked_indeterminate) == (1, 1)
+    assert store.recover_pending_runs() == 1  # only the run that provably never dispatched
 
     pending_after = store.get_history(owner, pending_conv.id).runs[0]
-    assert pending_after.status is RunStatus.FAILED
+    assert pending_after.status is RunStatus.FAILED and pending_after.id == pending.id
     assert pending_after.failure_code == "interrupted_before_dispatch"
-    assert pending_after.id == pending.id
+    assert pending_after.termination_basis is EvidenceBasis.NEVER_DISPATCHED
+    # A possibly-invoked run is NOT guessed at: it stays in flight until evidence resolves it.
     flight_after = store.get_history(owner, flight_conv.id).runs[0]
-    assert flight_after.status is RunStatus.INDETERMINATE  # not failed, not succeeded
+    assert flight_after.status is RunStatus.IN_FLIGHT
+    assert [r.id for r in store.list_unresolved_runs()] == [in_flight.id]
     assert store.get_history(owner, done_conv.id).runs[0].status is RunStatus.SUCCEEDED
 
     admit(store, owner, pending_conv.id, "again")  # never-dispatched work released the gate
     with pytest.raises(ConversationBusy):  # unresolved work keeps the conversation closed
         admit(store, owner, flight_conv.id, "again")
-    assert store.recover_unsettled_runs().marked_indeterminate == 0  # idempotent
+    assert store.recover_pending_runs() == 1  # only the newly admitted pending run; idempotent
+    assert store.recover_pending_runs() == 0
 
 
 def test_history_survives_reopening_the_database(
@@ -218,11 +236,11 @@ def test_history_survives_reopening_the_database(
 ) -> None:
     conversation = store.create_conversation(owner, "Persisted")
     run = admit(store, owner, conversation.id, "hello").run
-    store.record_dispatch(run.id, "m", "r")
+    dispatch(store, run.id)
     store.publish_response(run.id, "hi there")
     before = store.get_history(owner, conversation.id)
 
-    reopened = SqliteStore(db_path, ManualClock())  # a brand new store object and connections
+    reopened = BoundStore(db_path, ManualClock())  # a brand new store object and connections
     assert reopened.ensure_dev_owner() == owner
     after = reopened.get_history(owner, conversation.id)
     assert after == before  # identities, order, content, instants, run association: unchanged
@@ -232,7 +250,7 @@ def test_history_survives_reopening_the_database(
 def test_read_messages_through_is_a_fixed_prefix(store: SqliteStore, owner: UserId) -> None:
     conversation = store.create_conversation(owner, None)
     first = admit(store, owner, conversation.id, "one")
-    store.record_dispatch(first.run.id, "m", "r")
+    dispatch(store, first.run.id)
     store.publish_response(first.run.id, "reply")
     second = admit(store, owner, conversation.id, "two")
     prefix = store.read_messages_through(conversation.id, first.user_message.id)

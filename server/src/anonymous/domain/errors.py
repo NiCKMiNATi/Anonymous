@@ -59,3 +59,41 @@ class RunStateConflict(AnonymousError):
     """A run was not in the state an operation required (e.g. already settled)."""
 
     code = "run_state_conflict"
+
+
+class GenerationBlocked(AnonymousError):
+    """New generation is refused visibly; nothing is appended (V0-D04). ``code`` names the cause."""
+
+    code = "generation_blocked"
+
+
+class RuntimeQuarantined(GenerationBlocked):
+    code = "runtime_quarantined"
+
+
+class LegacyUnresolvedBlock(GenerationBlocked):
+    code = "generation_blocked_legacy_unresolved"
+
+
+class ConfigurationUnavailable(GenerationBlocked):
+    code = "configuration_unavailable"
+
+
+class ConfigurationUnbound(GenerationBlocked):
+    code = "configuration_unbound_legacy"
+
+
+class ExecutionUnresolved(GenerationBlocked):
+    """A retry was requested while the latest attempt is unresolved (reconcile first)."""
+
+    code = "execution_unresolved"
+
+
+class RetryNotEligible(AnonymousError):
+    code = "retry_not_eligible"
+
+
+class OwnershipError(AnonymousError):
+    """The dataset is owned by another process or its identity is not acceptable."""
+
+    code = "dataset_ownership_error"

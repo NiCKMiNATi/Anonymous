@@ -139,7 +139,10 @@ Changes made after the independent review ([report](../reviews/slice-0a-codex-re
 - **Load failures (R4).** HTTP-level failures of the list or conversation load show an error with a user-initiated "Retry loading …" button (a single idempotent GET each). There is no automatic retry. Transport failures still use the banner Retry.
 - **Origins (R5).** See the security posture above.
 
-## Gate carried forward: R6 / LD-04 (not addressed in 0A)
+## Gate carried forward: R6 / LD-04 (not addressed in 0A; revised design proposed 2026-10-11, pending re-review)
+
+**Update 2026-10-11:** a design for this gate is **proposed** (revision 3) in the [LD-04 design](../design/ld-04-execution-lifecycle.md), [ADR-0013](../adr/0013-execution-attempt-lifecycle-and-release-evidence.md) and [ADR-0014](../adr/0014-execution-configuration-provenance-and-continuity.md). Revisions 1 and 2 were each returned BLOCKED by independent review; revision 3 awaits re-review and owner confirmation, so the gate is **not** closed. Nothing in 0A changed. Slice 0B is staged: 0B-1 (lifecycle against a scripted port) after re-review and owner confirmation; 0B-2 (real runtime adapter) additionally needs runtime evidence and the owner's model-download authorization. The original statement of the gate follows unchanged.
+
 
 `ModelPort` is a synchronous `generate` call. Before any real, long-running or separately supervised runtime is attached (Slice 0B), a design task (likely with an ADR) must define: runtime correlation and supervision; known termination versus uncertain transport failure; the durable fact "output observed, publication uncertain"; safe admission release for `in_flight`/`indeterminate` runs; and explicit retry on the same saved user message with a new run. Treating a transport exception as proof of non-execution is not permitted. This is a blocker for the real-runtime milestone, not a defect of the fake adapter.
 

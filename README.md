@@ -44,4 +44,4 @@ uv run anonymous-server  # --port, --db-path, --fake-delay-seconds are available
 cd ../client && npm run dev   # http://127.0.0.1:5173/
 ```
 
-The development database defaults to `server/.anonymous-data/anonymous-dev.sqlite3` (git-ignored). Type `[fake:fail]` in a message to exercise the failure path with the fake model.
+The development database defaults to `server/.anonymous-data/anonymous-0b1-dev.sqlite3` (git-ignored). Type `[fake:fail]` in a message to exercise the failure path with the fake model.

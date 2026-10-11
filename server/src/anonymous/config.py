@@ -20,7 +20,7 @@ _LOOPBACK_AUTHORITIES = ("127.0.0.1", "localhost", "[::1]")
 
 @dataclass(frozen=True, slots=True)
 class Settings:
-    db_path: Path = Path(".anonymous-data/anonymous-dev.sqlite3")
+    db_path: Path = Path(".anonymous-data/anonymous-0b1-dev.sqlite3")
     host: str = "127.0.0.1"
     port: int = DEFAULT_PORT
     client_dist: Path | None = None

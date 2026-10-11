@@ -3,9 +3,14 @@
 from __future__ import annotations
 
 import threading
+from collections import deque
 from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
+from anonymous.adapters.persistence.sqlite.store import SqliteStore
+from anonymous.application.configuration import baseline_manifest
 from anonymous.application.ports.model import (
     ModelExecutionError,
     ModelIdentity,
@@ -13,8 +18,8 @@ from anonymous.application.ports.model import (
     ModelRequest,
 )
 from anonymous.domain.errors import StorageFailure, StorageOutcomeUnknown
-from anonymous.domain.ids import RunId
-from anonymous.domain.models import ModelRun
+from anonymous.domain.ids import UserId
+from anonymous.domain.models import Conversation
 
 START = datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC)
 
@@ -83,8 +88,37 @@ def failing_model() -> RecordingModel:
     return RecordingModel(error=ModelExecutionError("boom_code", "Simulated runtime failure."))
 
 
+@dataclass(slots=True)
+class Fault:
+    """One scripted fault for one operation. ``kind``:
+
+    * ``pass``            — forward unchanged (skips one call in the script);
+    * ``fail``            — raise ``StorageFailure``; the store is not called (known not saved);
+    * ``unknown_lost``    — raise ``StorageOutcomeUnknown`` without calling the store;
+    * ``unknown_durable`` — call the store (the write commits), then raise the unknown outcome;
+    * ``before`` / ``after`` — run ``hook`` before / after the real call (scheduling probe);
+    * ``raise``           — raise ``error``.
+    """
+
+    kind: str
+    hook: Callable[[], None] | None = None
+    error: Exception | None = None
+
+
+_LEGACY_ATTRIBUTES = {
+    "fail_admit": ("admit_submission", "admit_retry"),
+    "fail_dispatch": ("authorize_dispatch",),
+    "fail_publish": ("publish_response",),
+    "fail_settle": ("settle_pending", "settle_in_flight", "settle_indeterminate"),
+}
+
+
 class FaultyExecutionStore:
-    """Delegates to a real store but injects failures at chosen checkpoints."""
+    """Delegates to a real store but injects failures at chosen operations.
+
+    ``fail_*`` attributes make every call of the mapped operations raise; ``script(op, *faults)``
+    queues faults consumed one per call (then calls pass through).
+    """
 
     def __init__(self, inner: object) -> None:
         self._inner = inner
@@ -92,30 +126,110 @@ class FaultyExecutionStore:
         self.fail_dispatch: Exception | None = None
         self.fail_publish: Exception | None = None
         self.fail_settle: Exception | None = None
+        self._scripts: dict[str, deque[Fault]] = {}
+        self._lock = threading.Lock()
+        self.calls: list[str] = []
 
-    def __getattr__(self, name: str) -> object:
-        return getattr(self._inner, name)
+    def script(self, operation: str, *faults: Fault) -> None:
+        with self._lock:
+            self._scripts.setdefault(operation, deque()).extend(faults)
 
-    def admit_submission(self, **kwargs: object) -> object:
-        if self.fail_admit:
-            raise self.fail_admit
-        return self._inner.admit_submission(**kwargs)  # type: ignore[attr-defined]
+    def __getattr__(self, name: str) -> Any:
+        target = getattr(self._inner, name)
+        if not callable(target):
+            return target
 
-    def record_dispatch(self, run_id: RunId, model_id: str, runtime_id: str) -> ModelRun:
-        if self.fail_dispatch:
-            raise self.fail_dispatch
-        return self._inner.record_dispatch(run_id, model_id, runtime_id)  # type: ignore[attr-defined, no-any-return]
+        def call(*args: Any, **kwargs: Any) -> Any:
+            self.calls.append(name)
+            for attribute, operations in _LEGACY_ATTRIBUTES.items():
+                error = getattr(self, attribute)
+                if error is not None and name in operations:
+                    raise error
+            with self._lock:
+                queue = self._scripts.get(name)
+                fault = queue.popleft() if queue else None
+            if fault is None:
+                return target(*args, **kwargs)
+            if fault.kind == "pass":
+                return target(*args, **kwargs)
+            if fault.kind == "fail":
+                raise StorageFailure("injected storage failure")
+            if fault.kind == "unknown_lost":
+                raise StorageOutcomeUnknown("injected unknown outcome")
+            if fault.kind == "unknown_durable":
+                target(*args, **kwargs)
+                raise StorageOutcomeUnknown("injected unknown outcome")
+            if fault.kind == "raise":
+                assert fault.error is not None
+                raise fault.error
+            if fault.kind == "before":
+                assert fault.hook is not None
+                fault.hook()
+                return target(*args, **kwargs)
+            if fault.kind == "after":
+                result = target(*args, **kwargs)
+                assert fault.hook is not None
+                fault.hook()
+                return result
+            raise AssertionError(f"unknown fault kind {fault.kind}")
 
-    def publish_response(self, run_id: RunId, content: str) -> object:
-        if self.fail_publish:
-            raise self.fail_publish
-        return self._inner.publish_response(run_id, content)  # type: ignore[attr-defined]
+        return call
 
-    def settle_failed(self, run_id: RunId, code: str, message: str) -> ModelRun:
-        if self.fail_settle:
-            raise self.fail_settle
-        return self._inner.settle_failed(run_id, code, message)  # type: ignore[attr-defined, no-any-return]
+
+class BoundStore(SqliteStore):
+    """A store whose ``create_conversation`` binds the shipped default configuration, like the
+    application service does, so lower-level tests need not repeat the digest."""
+
+    def create_conversation(
+        self, owner: UserId, title: str | None, configuration_digest: str | None = None
+    ) -> Conversation:
+        return super().create_conversation(
+            owner, title, configuration_digest or baseline_manifest().digest
+        )
 
 
 STORAGE_FAILURE = StorageFailure("injected storage failure")
 STORAGE_UNKNOWN = StorageOutcomeUnknown("injected unknown outcome")
+
+
+class Scheduler:
+    """Controlled scheduling: named checkpoints in the coordinator can be held and released.
+
+    Usage: ``point = scheduler.hold("after_t3b")``; the supervised thread blocks when it reaches
+    that point; the test calls ``point.wait_reached()``, does something, then ``point.release()``.
+    ``events`` records every checkpoint passed, in order, for ordering assertions.
+    """
+
+    class Point:
+        def __init__(self) -> None:
+            self.reached = threading.Event()
+            self._release = threading.Event()
+
+        def wait_reached(self, timeout: float = 5.0) -> bool:
+            return self.reached.wait(timeout)
+
+        def release(self) -> None:
+            self._release.set()
+
+    def __init__(self) -> None:
+        self._points: dict[str, Scheduler.Point] = {}
+        self._lock = threading.Lock()
+        self.events: list[str] = []
+        self.hooks: dict[str, Callable[[str], None]] = {}
+
+    def hold(self, name: str) -> Scheduler.Point:
+        point = Scheduler.Point()
+        with self._lock:
+            self._points[name] = point
+        return point
+
+    def __call__(self, name: str, run_id: str) -> None:
+        with self._lock:
+            self.events.append(name)
+            point = self._points.pop(name, None)
+        hook = self.hooks.get(name)
+        if hook is not None:
+            hook(run_id)
+        if point is not None:
+            point.reached.set()
+            assert point._release.wait(10), f"checkpoint {name} was never released"

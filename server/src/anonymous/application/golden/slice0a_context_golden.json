@@ -1,0 +1,819 @@
+{
+ "facts": {
+  "context_message_fields": [
+   "role",
+   "content"
+  ],
+  "model_request_fields": [
+   "messages"
+  ],
+  "note": "The 0A ModelRequest carries only an ordered tuple of (role, content). 0A applied no system instructions, no sampling or other settings, no budget/omission and no behavior profile. These are properties of the 0A types captured here, not an assumption.",
+  "reference_commit": "01e9f46559cfca4c30777b940a8ca7d5f8af25d8"
+ },
+ "fixtures": [
+  {
+   "description": "single user message, one successful turn",
+   "dispatched_views": [
+    {
+     "trigger_position": 1,
+     "view": [
+      {
+       "content": "Hello",
+       "role": "user"
+      }
+     ],
+     "view_sha256": "013cf0c05f083773340d61c256a32240e92171b332a25ed7521733a86c129a37"
+    }
+   ],
+   "history_after": [
+    {
+     "content": "Hello",
+     "position": 1,
+     "role": "user"
+    },
+    {
+     "content": "Hi there",
+     "position": 2,
+     "role": "assistant"
+    }
+   ],
+   "id": "FX-01",
+   "rebuilt_views_over_final_history": [
+    {
+     "trigger_position": 1,
+     "view": [
+      {
+       "content": "Hello",
+       "role": "user"
+      }
+     ],
+     "view_sha256": "013cf0c05f083773340d61c256a32240e92171b332a25ed7521733a86c129a37"
+    }
+   ],
+   "runs": [
+    {
+     "failure_code": null,
+     "status": "succeeded"
+    }
+   ]
+  },
+  {
+   "description": "three alternating turns; each dispatched view is the whole committed prefix through its trigger",
+   "dispatched_views": [
+    {
+     "trigger_position": 1,
+     "view": [
+      {
+       "content": "First question",
+       "role": "user"
+      }
+     ],
+     "view_sha256": "3b6cc3c038e4226f5dbb96cf20e2d6187129bc6990c88638ffee4d1bf91bb6c9"
+    },
+    {
+     "trigger_position": 3,
+     "view": [
+      {
+       "content": "First question",
+       "role": "user"
+      },
+      {
+       "content": "First answer",
+       "role": "assistant"
+      },
+      {
+       "content": "Second question",
+       "role": "user"
+      }
+     ],
+     "view_sha256": "0d3fce69732e6158b8f64e5f0639e998dc05d2206913c80205c06f8c76d094f7"
+    },
+    {
+     "trigger_position": 5,
+     "view": [
+      {
+       "content": "First question",
+       "role": "user"
+      },
+      {
+       "content": "First answer",
+       "role": "assistant"
+      },
+      {
+       "content": "Second question",
+       "role": "user"
+      },
+      {
+       "content": "Second answer",
+       "role": "assistant"
+      },
+      {
+       "content": "Third question",
+       "role": "user"
+      }
+     ],
+     "view_sha256": "e1b4303e04471f7b46fc099672967277471f6797ed5fe290ff41d6ae19a6a3ec"
+    }
+   ],
+   "history_after": [
+    {
+     "content": "First question",
+     "position": 1,
+     "role": "user"
+    },
+    {
+     "content": "First answer",
+     "position": 2,
+     "role": "assistant"
+    },
+    {
+     "content": "Second question",
+     "position": 3,
+     "role": "user"
+    },
+    {
+     "content": "Second answer",
+     "position": 4,
+     "role": "assistant"
+    },
+    {
+     "content": "Third question",
+     "position": 5,
+     "role": "user"
+    },
+    {
+     "content": "Third answer",
+     "position": 6,
+     "role": "assistant"
+    }
+   ],
+   "id": "FX-02",
+   "rebuilt_views_over_final_history": [
+    {
+     "trigger_position": 1,
+     "view": [
+      {
+       "content": "First question",
+       "role": "user"
+      }
+     ],
+     "view_sha256": "3b6cc3c038e4226f5dbb96cf20e2d6187129bc6990c88638ffee4d1bf91bb6c9"
+    },
+    {
+     "trigger_position": 3,
+     "view": [
+      {
+       "content": "First question",
+       "role": "user"
+      },
+      {
+       "content": "First answer",
+       "role": "assistant"
+      },
+      {
+       "content": "Second question",
+       "role": "user"
+      }
+     ],
+     "view_sha256": "0d3fce69732e6158b8f64e5f0639e998dc05d2206913c80205c06f8c76d094f7"
+    },
+    {
+     "trigger_position": 5,
+     "view": [
+      {
+       "content": "First question",
+       "role": "user"
+      },
+      {
+       "content": "First answer",
+       "role": "assistant"
+      },
+      {
+       "content": "Second question",
+       "role": "user"
+      },
+      {
+       "content": "Second answer",
+       "role": "assistant"
+      },
+      {
+       "content": "Third question",
+       "role": "user"
+      }
+     ],
+     "view_sha256": "e1b4303e04471f7b46fc099672967277471f6797ed5fe290ff41d6ae19a6a3ec"
+    }
+   ],
+   "runs": [
+    {
+     "failure_code": null,
+     "status": "succeeded"
+    },
+    {
+     "failure_code": null,
+     "status": "succeeded"
+    },
+    {
+     "failure_code": null,
+     "status": "succeeded"
+    }
+   ]
+  },
+  {
+   "description": "text fidelity: whitespace, CRLF, tabs, NFC/NFD, emoji, RTL, bracket marker; no trimming/normalization",
+   "dispatched_views": [
+    {
+     "trigger_position": 1,
+     "view": [
+      {
+       "content": "  leading and trailing  \n",
+       "role": "user"
+      }
+     ],
+     "view_sha256": "c833a364fe29ac303316d2b6879c146db723117ef435a6e229d59411c6351195"
+    },
+    {
+     "trigger_position": 3,
+     "view": [
+      {
+       "content": "  leading and trailing  \n",
+       "role": "user"
+      },
+      {
+       "content": "  reply with spaces \r\n",
+       "role": "assistant"
+      },
+      {
+       "content": "line1\r\nline2\tTabbed",
+       "role": "user"
+      }
+     ],
+     "view_sha256": "eeee74ee239bec074ae7c071faa3d4910c3792be760c52082730a30d34efd5fc"
+    },
+    {
+     "trigger_position": 5,
+     "view": [
+      {
+       "content": "  leading and trailing  \n",
+       "role": "user"
+      },
+      {
+       "content": "  reply with spaces \r\n",
+       "role": "assistant"
+      },
+      {
+       "content": "line1\r\nline2\tTabbed",
+       "role": "user"
+      },
+      {
+       "content": "caf\u00e9",
+       "role": "assistant"
+      },
+      {
+       "content": "cafe\u0301 vs caf\u00e9 \ud83d\ude00 \u05e9\u05dc\u05d5\u05dd",
+       "role": "user"
+      }
+     ],
+     "view_sha256": "fe0d407aae0d76620546be3478a59d029a5330c4752cb8f1dc0a19dad32c7ca6"
+    },
+    {
+     "trigger_position": 7,
+     "view": [
+      {
+       "content": "  leading and trailing  \n",
+       "role": "user"
+      },
+      {
+       "content": "  reply with spaces \r\n",
+       "role": "assistant"
+      },
+      {
+       "content": "line1\r\nline2\tTabbed",
+       "role": "user"
+      },
+      {
+       "content": "caf\u00e9",
+       "role": "assistant"
+      },
+      {
+       "content": "cafe\u0301 vs caf\u00e9 \ud83d\ude00 \u05e9\u05dc\u05d5\u05dd",
+       "role": "user"
+      },
+      {
+       "content": "[fake:fail] literal text in assistant content",
+       "role": "assistant"
+      },
+      {
+       "content": "[fake:fail] in user content with a scripted stub",
+       "role": "user"
+      }
+     ],
+     "view_sha256": "201a9bffc489c584b44fa36caf1fe642ce77514d564364b5c2a965d438685452"
+    }
+   ],
+   "history_after": [
+    {
+     "content": "  leading and trailing  \n",
+     "position": 1,
+     "role": "user"
+    },
+    {
+     "content": "  reply with spaces \r\n",
+     "position": 2,
+     "role": "assistant"
+    },
+    {
+     "content": "line1\r\nline2\tTabbed",
+     "position": 3,
+     "role": "user"
+    },
+    {
+     "content": "caf\u00e9",
+     "position": 4,
+     "role": "assistant"
+    },
+    {
+     "content": "cafe\u0301 vs caf\u00e9 \ud83d\ude00 \u05e9\u05dc\u05d5\u05dd",
+     "position": 5,
+     "role": "user"
+    },
+    {
+     "content": "[fake:fail] literal text in assistant content",
+     "position": 6,
+     "role": "assistant"
+    },
+    {
+     "content": "[fake:fail] in user content with a scripted stub",
+     "position": 7,
+     "role": "user"
+    },
+    {
+     "content": "ok",
+     "position": 8,
+     "role": "assistant"
+    }
+   ],
+   "id": "FX-03",
+   "rebuilt_views_over_final_history": [
+    {
+     "trigger_position": 1,
+     "view": [
+      {
+       "content": "  leading and trailing  \n",
+       "role": "user"
+      }
+     ],
+     "view_sha256": "c833a364fe29ac303316d2b6879c146db723117ef435a6e229d59411c6351195"
+    },
+    {
+     "trigger_position": 3,
+     "view": [
+      {
+       "content": "  leading and trailing  \n",
+       "role": "user"
+      },
+      {
+       "content": "  reply with spaces \r\n",
+       "role": "assistant"
+      },
+      {
+       "content": "line1\r\nline2\tTabbed",
+       "role": "user"
+      }
+     ],
+     "view_sha256": "eeee74ee239bec074ae7c071faa3d4910c3792be760c52082730a30d34efd5fc"
+    },
+    {
+     "trigger_position": 5,
+     "view": [
+      {
+       "content": "  leading and trailing  \n",
+       "role": "user"
+      },
+      {
+       "content": "  reply with spaces \r\n",
+       "role": "assistant"
+      },
+      {
+       "content": "line1\r\nline2\tTabbed",
+       "role": "user"
+      },
+      {
+       "content": "caf\u00e9",
+       "role": "assistant"
+      },
+      {
+       "content": "cafe\u0301 vs caf\u00e9 \ud83d\ude00 \u05e9\u05dc\u05d5\u05dd",
+       "role": "user"
+      }
+     ],
+     "view_sha256": "fe0d407aae0d76620546be3478a59d029a5330c4752cb8f1dc0a19dad32c7ca6"
+    },
+    {
+     "trigger_position": 7,
+     "view": [
+      {
+       "content": "  leading and trailing  \n",
+       "role": "user"
+      },
+      {
+       "content": "  reply with spaces \r\n",
+       "role": "assistant"
+      },
+      {
+       "content": "line1\r\nline2\tTabbed",
+       "role": "user"
+      },
+      {
+       "content": "caf\u00e9",
+       "role": "assistant"
+      },
+      {
+       "content": "cafe\u0301 vs caf\u00e9 \ud83d\ude00 \u05e9\u05dc\u05d5\u05dd",
+       "role": "user"
+      },
+      {
+       "content": "[fake:fail] literal text in assistant content",
+       "role": "assistant"
+      },
+      {
+       "content": "[fake:fail] in user content with a scripted stub",
+       "role": "user"
+      }
+     ],
+     "view_sha256": "201a9bffc489c584b44fa36caf1fe642ce77514d564364b5c2a965d438685452"
+    }
+   ],
+   "runs": [
+    {
+     "failure_code": null,
+     "status": "succeeded"
+    },
+    {
+     "failure_code": null,
+     "status": "succeeded"
+    },
+    {
+     "failure_code": null,
+     "status": "succeeded"
+    },
+    {
+     "failure_code": null,
+     "status": "succeeded"
+    }
+   ]
+  },
+  {
+   "big_user_content_sha256": "3d6c92dc58f0c017a1591da81ecdf19805b5fdc6926123648026cdbfb209a73d",
+   "content_rule": "'ab' * 16000",
+   "description": "maximum-length user message (32000 characters, content_rule 'ab'*16000), no truncation",
+   "dispatched_views": [
+    {
+     "trigger_position": 1,
+     "view": [
+      {
+       "content": "@rule:'ab'*16000",
+       "role": "user"
+      }
+     ],
+     "view_sha256": "1bf15aa1ca1a55235f8d942bdbbc1386ca4d605bf268f80b3d07745d19e3b8bd"
+    }
+   ],
+   "history_after": [
+    {
+     "content": "@rule:'ab'*16000",
+     "position": 1,
+     "role": "user"
+    },
+    {
+     "content": "short",
+     "position": 2,
+     "role": "assistant"
+    }
+   ],
+   "id": "FX-04",
+   "rebuilt_views_over_final_history": [
+    {
+     "trigger_position": 1,
+     "view": [
+      {
+       "content": "@rule:'ab'*16000",
+       "role": "user"
+      }
+     ],
+     "view_sha256": "1bf15aa1ca1a55235f8d942bdbbc1386ca4d605bf268f80b3d07745d19e3b8bd"
+    }
+   ],
+   "runs": [
+    {
+     "failure_code": null,
+     "status": "succeeded"
+    }
+   ]
+  },
+  {
+   "description": "failed attempt contributes nothing: user message whose run failed stays in later views; no assistant message for it",
+   "dispatched_views": [
+    {
+     "trigger_position": 1,
+     "view": [
+      {
+       "content": "will fail",
+       "role": "user"
+      }
+     ],
+     "view_sha256": "6f7c206b7459b5bf56a3bfeea16b115ace13b9f771cf5d4449e9b35440909469"
+    },
+    {
+     "trigger_position": 2,
+     "view": [
+      {
+       "content": "will fail",
+       "role": "user"
+      },
+      {
+       "content": "after failure",
+       "role": "user"
+      }
+     ],
+     "view_sha256": "93e211eef1fab81432aa9a8f602447c525eab1915438dccda5c5c70dcb24c22d"
+    }
+   ],
+   "history_after": [
+    {
+     "content": "will fail",
+     "position": 1,
+     "role": "user"
+    },
+    {
+     "content": "after failure",
+     "position": 2,
+     "role": "user"
+    },
+    {
+     "content": "recovered",
+     "position": 3,
+     "role": "assistant"
+    }
+   ],
+   "id": "FX-05",
+   "rebuilt_views_over_final_history": [
+    {
+     "trigger_position": 1,
+     "view": [
+      {
+       "content": "will fail",
+       "role": "user"
+      }
+     ],
+     "view_sha256": "6f7c206b7459b5bf56a3bfeea16b115ace13b9f771cf5d4449e9b35440909469"
+    },
+    {
+     "trigger_position": 2,
+     "view": [
+      {
+       "content": "will fail",
+       "role": "user"
+      },
+      {
+       "content": "after failure",
+       "role": "user"
+      }
+     ],
+     "view_sha256": "93e211eef1fab81432aa9a8f602447c525eab1915438dccda5c5c70dcb24c22d"
+    }
+   ],
+   "runs": [
+    {
+     "failure_code": "stub_failure",
+     "status": "failed"
+    },
+    {
+     "failure_code": null,
+     "status": "succeeded"
+    }
+   ]
+  },
+  {
+   "description": "authoritative order is position, not commit instant: clock runs backwards",
+   "dispatched_views": [
+    {
+     "trigger_position": 1,
+     "view": [
+      {
+       "content": "one",
+       "role": "user"
+      }
+     ],
+     "view_sha256": "a05b8cd35785d95d2144e602cfb06d4458083ffcd3cd7bc27339d725930ca99c"
+    },
+    {
+     "trigger_position": 3,
+     "view": [
+      {
+       "content": "one",
+       "role": "user"
+      },
+      {
+       "content": "uno",
+       "role": "assistant"
+      },
+      {
+       "content": "two",
+       "role": "user"
+      }
+     ],
+     "view_sha256": "119c3731dc8d8894252edbc1278e8eecd5d9fc7222422f28e21807e14ce1ed6b"
+    },
+    {
+     "trigger_position": 5,
+     "view": [
+      {
+       "content": "one",
+       "role": "user"
+      },
+      {
+       "content": "uno",
+       "role": "assistant"
+      },
+      {
+       "content": "two",
+       "role": "user"
+      },
+      {
+       "content": "dos",
+       "role": "assistant"
+      },
+      {
+       "content": "three",
+       "role": "user"
+      }
+     ],
+     "view_sha256": "e6e8d91389eacebc6bffdaad444e81aa5a4aeced07fe95e089c15250995cb2d8"
+    }
+   ],
+   "history_after": [
+    {
+     "content": "one",
+     "position": 1,
+     "role": "user"
+    },
+    {
+     "content": "uno",
+     "position": 2,
+     "role": "assistant"
+    },
+    {
+     "content": "two",
+     "position": 3,
+     "role": "user"
+    },
+    {
+     "content": "dos",
+     "position": 4,
+     "role": "assistant"
+    },
+    {
+     "content": "three",
+     "position": 5,
+     "role": "user"
+    },
+    {
+     "content": "tres",
+     "position": 6,
+     "role": "assistant"
+    }
+   ],
+   "id": "FX-06",
+   "rebuilt_views_over_final_history": [
+    {
+     "trigger_position": 1,
+     "view": [
+      {
+       "content": "one",
+       "role": "user"
+      }
+     ],
+     "view_sha256": "a05b8cd35785d95d2144e602cfb06d4458083ffcd3cd7bc27339d725930ca99c"
+    },
+    {
+     "trigger_position": 3,
+     "view": [
+      {
+       "content": "one",
+       "role": "user"
+      },
+      {
+       "content": "uno",
+       "role": "assistant"
+      },
+      {
+       "content": "two",
+       "role": "user"
+      }
+     ],
+     "view_sha256": "119c3731dc8d8894252edbc1278e8eecd5d9fc7222422f28e21807e14ce1ed6b"
+    },
+    {
+     "trigger_position": 5,
+     "view": [
+      {
+       "content": "one",
+       "role": "user"
+      },
+      {
+       "content": "uno",
+       "role": "assistant"
+      },
+      {
+       "content": "two",
+       "role": "user"
+      },
+      {
+       "content": "dos",
+       "role": "assistant"
+      },
+      {
+       "content": "three",
+       "role": "user"
+      }
+     ],
+     "view_sha256": "e6e8d91389eacebc6bffdaad444e81aa5a4aeced07fe95e089c15250995cb2d8"
+    }
+   ],
+   "runs": [
+    {
+     "failure_code": null,
+     "status": "succeeded"
+    },
+    {
+     "failure_code": null,
+     "status": "succeeded"
+    },
+    {
+     "failure_code": null,
+     "status": "succeeded"
+    }
+   ]
+  },
+  {
+   "description": "two conversations interleaved in one database; each dispatched view contains only its own conversation",
+   "dispatched_views_in_call_order": [
+    {
+     "view": [
+      {
+       "content": "A1",
+       "role": "user"
+      }
+     ],
+     "view_sha256": "111d2132059413bb60f9b883d922b649dacf796bc3f0b0be4f0e7a4c61492da4"
+    },
+    {
+     "view": [
+      {
+       "content": "B1",
+       "role": "user"
+      }
+     ],
+     "view_sha256": "1310bfaa399f94d7d97599492bdcf56757c71c6956dd3a9c944cfa6475bb4271"
+    },
+    {
+     "view": [
+      {
+       "content": "A1",
+       "role": "user"
+      },
+      {
+       "content": "a1",
+       "role": "assistant"
+      },
+      {
+       "content": "A2",
+       "role": "user"
+      }
+     ],
+     "view_sha256": "9a7d4feff90fb3c279a6a9cb7233b8f8127c54c383478987ed7b08715ea3f7b7"
+    },
+    {
+     "view": [
+      {
+       "content": "B1",
+       "role": "user"
+      },
+      {
+       "content": "b1",
+       "role": "assistant"
+      },
+      {
+       "content": "B2",
+       "role": "user"
+      }
+     ],
+     "view_sha256": "91a21cd68064b9f6d0d4d4850634631e112f827d1d3cb5c38dfc9105ac7504f4"
+    }
+   ],
+   "id": "FX-07"
+  }
+ ],
+ "schema": "ld-04-slice-0a-context-golden/1"
+}

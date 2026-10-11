@@ -10,8 +10,19 @@ from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
 
+from anonymous.domain.binding import ExecutionBinding
 from anonymous.domain.errors import InvalidMessage, InvalidTitle
+from anonymous.domain.evidence import (
+    ClosureReason,
+    CompletionObserved,
+    EvidenceBasis,
+    Handoff,
+    HandoffOutcome,
+    RecordEpoch,
+    RunKind,
+)
 from anonymous.domain.ids import ConversationId, MessageId, RunId, UserId
+from anonymous.domain.provenance import ExecutionProvenance
 
 MAX_MESSAGE_CHARS = 32_000
 """Placeholder input bound. The real budget depends on the runtime and is a later design gate."""
@@ -42,7 +53,8 @@ _ALLOWED_TRANSITIONS: dict[RunStatus, frozenset[RunStatus]] = {
     RunStatus.IN_FLIGHT: frozenset(
         {RunStatus.SUCCEEDED, RunStatus.FAILED, RunStatus.INDETERMINATE}
     ),
-    RunStatus.INDETERMINATE: frozenset(),  # resolution is deferred (see ExecPlan)
+    # T7: only with an admissible termination basis (domain.evidence); never to succeeded.
+    RunStatus.INDETERMINATE: frozenset({RunStatus.FAILED}),
     RunStatus.SUCCEEDED: frozenset(),
     RunStatus.FAILED: frozenset(),
 }
@@ -84,6 +96,25 @@ class ModelRun:
     requested_at: datetime  # execution timing, distinct from message commit instants
     dispatched_at: datetime | None
     settled_at: datetime | None
+    # -- LD-04 (migration 0002); defaults describe a legacy / not-yet-dispatched run ------------
+    record_epoch: RecordEpoch = RecordEpoch.CURRENT
+    state_version: int = 0
+    kind: RunKind = RunKind.INITIAL
+    retry_of_run_id: RunId | None = None
+    closed_at: datetime | None = None
+    closure_reason: ClosureReason | None = None
+    handoff: Handoff | None = None
+    handoff_outcome: HandoffOutcome | None = None
+    execution_boot_id: str | None = None
+    slot_id: str | None = None
+    binding: ExecutionBinding | None = None
+    configuration_digest: str | None = None
+    provenance: ExecutionProvenance | None = None
+    termination_basis: EvidenceBasis | None = None
+    completion_observed: CompletionObserved | None = None
+
+    def binding_late_delivery_excluded(self) -> bool:
+        return self.binding is not None and self.binding.late_delivery_excluded
 
 
 def validate_message_content(content: object) -> str:

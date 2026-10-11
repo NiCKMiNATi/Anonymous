@@ -83,3 +83,35 @@ def test_only_composition_names_concrete_adapters() -> None:
             if module.startswith("anonymous.adapters"):
                 offenders.append(f"{rel} imports {module}")
     assert offenders == []
+
+
+def calls_of(attribute: str, receiver: str | None = None) -> list[str]:
+    """Files under ``src`` that call ``<receiver>.<attribute>(`` (production code only)."""
+    found = []
+    for path in ROOT.rglob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)):
+                continue
+            if node.func.attr != attribute:
+                continue
+            owner = node.func.value
+            name = owner.attr if isinstance(owner, ast.Attribute) else getattr(owner, "id", None)
+            if receiver is None or name == receiver:
+                found.append(path.relative_to(ROOT).as_posix())
+    return sorted(set(found))
+
+
+def test_the_runtime_is_started_from_exactly_one_place() -> None:
+    # G-2: only the supervised worker, after T3b, under the handoff gate. Reconcile, retry,
+    # replay and restart have no code path to ``start``.
+    assert calls_of("start", "_runtime") == ["application/worker.py"]
+    assert calls_of("mark_handoff_started", "_store") == ["application/worker.py"]
+    assert calls_of("await_result", "_runtime") == ["application/worker.py"]
+
+
+def test_closure_of_an_open_fence_has_a_single_gated_code_path() -> None:
+    # A-4: every closure goes through RunSettler (which takes the handoff gate). The worker's only
+    # other writer is the atomic closure+settlement after the bound instance has delivered.
+    assert calls_of("close_run", "_store") == ["application/settling.py"]
+    assert calls_of("settle_in_flight", "_store") == ["application/settling.py"]
