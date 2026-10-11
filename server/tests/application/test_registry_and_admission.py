@@ -244,6 +244,117 @@ def test_a_start_that_does_not_prove_non_start_is_never_treated_as_terminated(
     assert registry.outstanding() == ["unsure"]
 
 
+def test_a_child_whose_thread_cannot_be_created_is_released_exactly_once(
+    start_barrier: Callable[..., StartBarrier],
+) -> None:
+    """The watchdog case: the parent is running, reserves a child, and the OS refuses the thread."""
+    registry = ThreadRegistry()
+    barrier = start_barrier("child")
+    barrier.fail_with = RuntimeError("can't start new thread")
+    barrier.release.set()
+    observed: list[object] = []
+    child_ran = threading.Event()
+
+    def parent() -> None:
+        try:
+            reservation_holder[0].spawn_child("child", child_ran.set)
+        except SpawnFailed as error:
+            observed.append(error)
+
+    reservation_holder = [registry.reserve("parent")]
+    reservation_holder[0].start(parent)
+    registry.begin_shutdown()
+    assert registry.join_all(5) is True  # the child's reservation did not leak
+    assert len(observed) == 1 and isinstance(observed[0], SpawnFailed)
+    assert not child_ran.is_set()
+    assert registry.outstanding() == []
+
+
+def test_a_child_whose_start_is_uncertain_keeps_ownership(
+    start_barrier: Callable[..., StartBarrier],
+) -> None:
+    registry = ThreadRegistry()
+    barrier = start_barrier("child")
+
+    class Interrupted(BaseException):
+        pass
+
+    barrier.fail_with = Interrupted()
+    barrier.release.set()
+    holder = [registry.reserve("parent")]
+    errors: list[BaseException] = []
+
+    def parent() -> None:
+        try:
+            holder[0].spawn_child("child", lambda: None)
+        except BaseException as error:  # the interrupt is delivered to the parent
+            errors.append(error)
+
+    holder[0].start(parent)
+    registry.begin_shutdown()
+    assert registry.join_all(0.3) is False  # the parent ended; the child may still run
+    assert registry.outstanding() == ["child"]
+    assert len(errors) == 1 and isinstance(errors[0], Interrupted)
+
+
+def test_a_thread_that_could_still_start_after_a_refused_start_never_runs_the_target(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The startup protocol, not the exception type, establishes non-start."""
+    registry = ThreadRegistry()
+    original = threading.Thread.start
+    seen: list[threading.Thread] = []
+
+    def refuse(self: threading.Thread) -> None:
+        seen.append(self)
+        raise RuntimeError("can't start new thread")
+
+    monkeypatch.setattr(threading.Thread, "start", refuse)
+    ran = threading.Event()
+    reservation = registry.reserve("zombie")
+    with pytest.raises(SpawnFailed):
+        reservation.start(ran.set)
+    monkeypatch.setattr(threading.Thread, "start", original)
+    assert registry.outstanding() == ["zombie"]  # still counted until the caller's cleanup ends
+
+    seen[0].start()  # the OS thread appears after all (the case the exception cannot rule out)
+    seen[0].join(5)
+    assert not ran.is_set()  # it found the reservation abandoned and ran nothing
+    assert registry.outstanding() == ["zombie"]  # and it did not release on the caller's behalf
+    reservation.release()
+    reservation.release()  # a second release changes nothing
+    registry.begin_shutdown()
+    assert registry.join_all(1) is True and registry.outstanding() == []
+
+
+def test_a_refused_start_after_the_thread_began_is_supervised_not_released(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    registry = ThreadRegistry()
+    original = threading.Thread.start
+    entered, finish = threading.Event(), threading.Event()
+
+    def start_then_report_failure(self: threading.Thread) -> None:
+        original(self)
+        assert entered.wait(5)  # the wrapper has claimed the reservation
+        raise RuntimeError("spurious")
+
+    monkeypatch.setattr(threading.Thread, "start", start_then_report_failure)
+
+    def target() -> None:
+        entered.set()
+        assert finish.wait(10)
+
+    reservation = registry.reserve("began")
+    thread = reservation.start(target)  # no SpawnFailed: the thread is running
+    monkeypatch.setattr(threading.Thread, "start", original)
+    registry.begin_shutdown()
+    assert registry.join_all(0.1) is False  # still counted while it runs
+    finish.set()
+    thread.join(5)
+    assert registry.join_all(5) is True
+
+
 # -- finding 1 at the application level: registration -> pause -> shutdown -> start -------------
 
 
@@ -360,6 +471,57 @@ def test_a_worker_thread_the_os_refuses_to_start_settles_the_run_and_releases_cl
     assert application.execution.threads.outstanding() == []
     assert not application.execution.controls.has_live_worker(outcome.run.id)
     assert application.shutdown(timeout_seconds=1) is True
+
+
+def test_a_watchdog_the_os_refuses_to_start_still_ends_in_quiescence_and_releases_ownership(
+    app: tuple[Application, ScriptedRuntime, Path], start_barrier: Callable[..., StartBarrier]
+) -> None:
+    application, _, path = app
+    cid = application.conversations.create_conversation(application.owner).id
+    barrier = start_barrier("anonymous-watchdog-")
+    barrier.fail_with = RuntimeError("can't start new thread")
+    barrier.release.set()
+    outcome = application.execution.begin_submit(
+        owner=application.owner,
+        conversation_id=cid,
+        submission_id=SubmissionId(new_uuid()),
+        content="q",
+    ).wait(5)
+    assert barrier.reached.is_set()
+    # The attempt could not be supervised: closed and quarantined, never published or guessed at.
+    assert outcome.assistant_message is None
+    assert outcome.run.status in (RunStatus.INDETERMINATE, RunStatus.FAILED)
+    assert application.shutdown(timeout_seconds=5) is True  # no leaked child reservation
+    assert not application.guard.held
+    successor = InstanceGuard(path)
+    successor.acquire()
+    successor.release()
+
+
+def test_a_watchdog_whose_start_is_uncertain_keeps_the_guard(
+    app: tuple[Application, ScriptedRuntime, Path], start_barrier: Callable[..., StartBarrier]
+) -> None:
+    application, _, path = app
+    cid = application.conversations.create_conversation(application.owner).id
+
+    class Interrupted(BaseException):
+        pass
+
+    barrier = start_barrier("anonymous-watchdog-")
+    barrier.fail_with = Interrupted()
+    barrier.release.set()
+    handle = application.execution.begin_submit(
+        owner=application.owner,
+        conversation_id=cid,
+        submission_id=SubmissionId(new_uuid()),
+        content="q",
+    )
+    with pytest.raises(Interrupted):
+        handle.wait(5)
+    assert application.shutdown(timeout_seconds=0.2) is False
+    assert application.guard.held
+    with pytest.raises(OwnershipError):
+        InstanceGuard(path).acquire()
 
 
 def test_a_start_that_cannot_be_confirmed_keeps_ownership(

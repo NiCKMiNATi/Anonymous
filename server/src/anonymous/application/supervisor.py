@@ -144,6 +144,7 @@ class _State(Enum):
     RESERVED = "reserved"  # counted; the thread has not been started
     STARTING = "starting"  # ``Thread.start`` was called; the target may begin executing at any time
     RUNNING = "running"  # the target is executing
+    ABANDONED = "abandoned"  # non-start established; the starter owns the release
     UNRESOLVED = "unresolved"  # ``start`` failed in a way that does not prove non-start
     ENDED = "ended"  # no longer counted
 
@@ -239,30 +240,40 @@ class ThreadRegistry:
         try:
             thread.start()
         except RuntimeError as error:
-            # ``Thread.start`` raises ``RuntimeError`` only when the OS could not create the thread
-            # (``_start_new_thread`` failed before any code of the new thread could run), so
-            # non-start is established. The reservation is NOT dropped here: the caller finishes
-            # its own cleanup (which may still write) and then releases it.
+            # The OS refused to create the thread (``Thread.start`` raises ``RuntimeError``). That
+            # is not taken on its own as proof: non-start is decided by the startup protocol. The
+            # wrapper *claims* the reservation (STARTING -> RUNNING) as its first act, under the
+            # same lock; here the starter *abandons* it (STARTING -> ABANDONED). Exactly one of
+            # the two wins. If the wrapper had already claimed, the thread did start and is
+            # supervised normally; if the starter wins, a thread that were to start later would
+            # find the reservation abandoned and return without running the target.
             with self._cond:
-                if reservation.state is _State.STARTING:
-                    reservation.state = _State.RESERVED
+                abandoned = reservation.state is _State.STARTING
+                if abandoned:
+                    reservation.state = _State.ABANDONED
                     reservation.thread = None
-            raise SpawnFailed(str(error)) from error
+            if abandoned:
+                # The reservation is NOT dropped here: the caller finishes its own cleanup (which
+                # may still write) and then releases it, exactly once.
+                raise SpawnFailed(str(error)) from error
+            return thread  # the wrapper had begun: the thread is running
         except BaseException:
             # Anything else does not prove the thread did not start (e.g. an interrupt after the
             # OS thread was created): keep the reservation outstanding. If the thread did start,
             # its wrapper ends the reservation when the target returns; if it did not, nothing
             # ever will, shutdown reports "incomplete" and the process must exit.
             with self._cond:
-                reservation.state = _State.UNRESOLVED
+                if reservation.state is _State.STARTING:
+                    reservation.state = _State.UNRESOLVED
             raise
         return thread
 
     def _wrap(self, reservation: Reservation, target: Callable[[], None]) -> Callable[[], None]:
         def run() -> None:
             with self._cond:
-                if reservation.state is _State.STARTING:
-                    reservation.state = _State.RUNNING
+                if reservation.state not in (_State.STARTING, _State.UNRESOLVED):
+                    return  # abandoned by its starter: the target never runs, the starter releases
+                reservation.state = _State.RUNNING
             try:
                 target()
             finally:
@@ -280,11 +291,17 @@ class ThreadRegistry:
             if parent.state not in (_State.STARTING, _State.RUNNING):
                 raise SpawnRefused("the parent is not running")
             child = self._reserve_locked(name)
-        return child.start(target)
+        try:
+            return child.start(target)
+        except SpawnFailed:
+            child.release()  # non-start established: the child's own reservation, once
+            raise
 
     def _release_unstarted(self, reservation: Reservation) -> None:
         with self._cond:
-            if reservation.state is not _State.RESERVED:
+            if reservation.state is _State.ENDED:
+                return  # already released: releasing twice never changes the count
+            if reservation.state not in (_State.RESERVED, _State.ABANDONED):
                 raise RuntimeError("only a reservation that never started may be released")
             reservation.state = _State.ENDED
             self._entries.pop(reservation._token, None)

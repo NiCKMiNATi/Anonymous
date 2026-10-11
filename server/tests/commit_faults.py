@@ -43,8 +43,13 @@ class Rule:
     nth: int = 1  # the nth matching event for this operation triggers; later ones pass
     pattern: str | None = None  # statement rules: the statement must start with this text
     seen: int = 0
-    fired: bool = False
+    hits: int = 0  # how many times this rule actually injected a fault
     repeat: bool = False  # fire on every matching event from the nth on
+    active: bool = True
+
+    @property
+    def fired(self) -> bool:
+        return self.hits > 0
 
 
 class CommitFaultPlan:
@@ -75,16 +80,29 @@ class CommitFaultPlan:
             return False
         with self._lock:
             for rule in self._rules:
-                if rule.operation != operation or rule.point != point:
+                if not rule.active or rule.operation != operation or rule.point != point:
                     continue
                 if rule.pattern is not None and not sql.lstrip().startswith(rule.pattern):
                     continue
                 rule.seen += 1
                 if rule.seen == rule.nth or (rule.repeat and rule.seen > rule.nth):
-                    rule.fired = True
+                    rule.hits += 1
                     self.events.append((operation, point))
                     return True
         return False
+
+    def disarm(self) -> None:
+        """Stop injecting; the rules stay recorded so ``verify`` still checks that they fired."""
+        with self._lock:
+            for rule in self._rules:
+                rule.active = False
+
+    def verify(self) -> None:
+        """Every armed rule must have injected at least once: a fault that never fired means the
+        test did not exercise the transaction it claims to."""
+        with self._lock:
+            silent = [f"{r.operation}/{r.point}" for r in self._rules if not r.fired]
+        assert not silent, f"armed fault rule(s) never fired: {silent}"
 
     def note(self, operation: str | None, what: str) -> None:
         with self._lock:
@@ -149,3 +167,4 @@ def faulting_commits(monkeypatch: pytest.MonkeyPatch) -> Iterator[CommitFaultPla
 
     monkeypatch.setattr(store_module, "connect", connect)
     yield plan
+    plan.verify()

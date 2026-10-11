@@ -33,3 +33,7 @@
 ## Known limitations (not defects)
 
 Scripted/in-process only; request-path writes outside run execution (conversation creation, configuration adoption) hold no reservation; a `Thread.start()` failure that does not prove non-start keeps ownership forever (conservative); `server/review_tests/` target the removed 0A API (mapped in the record §5); everything in [slice-0b-1.md](../implementation/slice-0b-1.md).
+
+## Second pass (three fixes, commit after `bdd1afa`)
+
+Review only that diff. (1) `supervisor.py`: `_start` claim/abandon protocol (`ABANDONED`, wrapper returns when not `STARTING/UNRESOLVED`), `_spawn_child` releases on `SpawnFailed`, idempotent `release()`; challenge: can the starter abandon while the wrapper is between its claim and `target()`; can an `UNRESOLVED` reservation be claimed by a wrapper twice; does `release()` of `ABANDONED` after a *later* real start leave a running thread uncounted (it runs nothing). (2) `commit_faults.py` `hits/verify/disarm` and the `faults.fired(...) == n` assertions in `test_commit_boundaries.py`: any armed rule that can fire on a different transaction of the same operation. (3) `test_process_restart.py::test_sigkill_during_generation…` and `durable_handoff`: `LIMIT 1` is safe only because that dataset holds one run.

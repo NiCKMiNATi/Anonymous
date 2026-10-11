@@ -118,13 +118,20 @@ def test_sigkill_during_generation_is_settled_on_restart_and_replays_without_a_s
             daemon=True,
         )
         posted.start()
+        # ``in_flight`` only means the dispatch was *authorized*. B4 is admissible only once the
+        # invocation began, so wait for the durable proof of it (the handoff marker, T3b, and the
+        # runtime's acceptance, T3c) before killing. A crash earlier than that is a different
+        # case (B1, never dispatched) with its own test: ``test_ownership_and_crash.py``
+        # ``[before_gate]``.
         deadline = time.monotonic() + 20
         while True:
             before = client.get(f"/api/v1/conversations/{cid}").json()
-            if before["runs"] and before["runs"][0]["status"] == "in_flight":
+            started = before["runs"] and before["runs"][0]["status"] == "in_flight"
+            if started and durable_handoff(db_path) == ("STARTED", "ACCEPTED"):
                 break
-            assert time.monotonic() < deadline, "the run never reached the runtime"
+            assert time.monotonic() < deadline, "the invocation never began"
             time.sleep(0.02)
+        assert durable_handoff(db_path) == ("STARTED", "ACCEPTED")  # still true at the kill
     posted.join(20)  # the server was SIGKILLed on leaving the block above
 
     with running_server(db_path, free_port(), kill=False) as client:
@@ -132,7 +139,8 @@ def test_sigkill_during_generation_is_settled_on_restart_and_replays_without_a_s
         assert after["messages"] == before["messages"]  # the user message is intact
         run = after["runs"][0]
         assert run["status"] == "failed" and run["id"] == before["runs"][0]["id"]
-        assert run["termination_basis"] == "process_exit_verified"
+        assert run["termination_basis"] == "process_exit_verified"  # B4: the handoff had begun
+        assert durable_handoff(db_path) == ("STARTED", "ACCEPTED")  # and was never repeated
         replay = client.post(
             f"/api/v1/conversations/{cid}/messages",
             json={"submission_id": submission_id, "content": "crash input"},
@@ -177,6 +185,18 @@ def test_a_durable_pending_run_is_settled_at_startup_without_inference(tmp_path:
         assert replay["run"]["failure_code"] == "interrupted_before_dispatch"
         assert replay["run"]["termination_basis"] == "never_dispatched"
         assert replay["assistant_message"] is None  # nothing was generated
+
+
+def durable_handoff(db_path: Path) -> tuple[str | None, str | None] | None:
+    """The run's durable handoff state, read from the database by the test (a second reader)."""
+    import sqlite3
+
+    conn = sqlite3.connect(db_path, timeout=5)
+    try:
+        row = conn.execute("SELECT handoff, handoff_outcome FROM model_runs LIMIT 1").fetchone()
+    finally:
+        conn.close()
+    return None if row is None else (row[0], row[1])
 
 
 def _post_ignoring_connection_loss(base_url: str, cid: str, submission_id: str) -> None:

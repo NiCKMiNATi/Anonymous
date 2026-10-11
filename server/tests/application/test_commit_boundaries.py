@@ -93,6 +93,9 @@ def test_admission_commit_that_failed_before_durability_saves_nothing_and_can_be
     faults.arm("admit_submission", BEFORE_COMMIT)
     with pytest.raises(StorageOutcomeUnknown):
         send(services, owner, cid, sid)
+    assert (
+        faults.fired("admit_submission", BEFORE_COMMIT) == 1
+    )  # the intended transaction was hit, once
     assert roles(store, owner, cid) == [] and store.get_history(owner, cid).runs == ()
     assert runtime.calls == []  # nothing was prepared, authorized or invoked
     resent = send(services, owner, cid, sid)  # the same submission id: nothing durable existed
@@ -115,6 +118,9 @@ def test_admission_commit_that_was_durable_is_preserved_never_dispatched_and_rec
     with pytest.raises(StorageOutcomeUnknown):  # the caller cannot know ...
         send(services, owner, cid, sid)
     first_user = store.get_history(owner, cid).messages[0]
+    assert (
+        faults.fired("admit_submission", AFTER_COMMIT) == 1
+    )  # the intended transaction was hit, once
     assert roles(store, owner, cid) == ["user"]  # ... but it is durable
     pending = run_of(store, owner, cid)
     assert pending.status is RunStatus.PENDING and runtime.calls == []
@@ -158,7 +164,7 @@ def test_a_failing_admission_statement_rolls_back_every_fact_and_is_a_known_fail
     with pytest.raises(StorageFailure) as raised:
         send(services, owner, cid)
     assert not isinstance(raised.value, StorageOutcomeUnknown)  # known: it was rolled back
-    assert rule.fired
+    assert rule.hits == 1
     assert roles(store, owner, cid) == [] and store.get_history(owner, cid).runs == ()
     conn = sqlite3.connect(str(db_path))
     try:
@@ -183,6 +189,9 @@ def test_dispatch_authorization_that_failed_before_durability_never_invokes_the_
     with pytest.raises(StorageOutcomeUnknown):
         send(services, owner, cid)
     run = run_of(store, owner, cid)
+    assert (
+        faults.fired("authorize_dispatch", BEFORE_COMMIT) == 1
+    )  # the intended transaction was hit, once
     assert run.status is RunStatus.PENDING and run.slot_id is None  # the slot was never taken
     assert [c.operation for c in runtime.calls if c.operation != "prepare"] == []
     assert store.generation_state().quarantined_runs == ()
@@ -203,7 +212,7 @@ def test_dispatch_statement_failure_is_a_known_rollback_settled_as_never_dispatc
     services, runtime, cid = system
     rule = faults.arm("authorize_dispatch", STATEMENT, pattern="UPDATE model_runs")
     outcome = send(services, owner, cid)
-    assert rule.fired
+    assert rule.hits == 1
     run = run_of(store, owner, cid)
     assert outcome.assistant_message is None
     assert run.status is RunStatus.FAILED and run.failure_code == "dispatch_not_recorded"
@@ -223,7 +232,7 @@ def test_handoff_marker_statement_failure_never_calls_start_and_reconcile_settle
     rule = faults.arm("mark_handoff_started", STATEMENT, pattern="UPDATE model_runs")
     with pytest.raises(StorageFailure):  # a known rollback, reported as such
         send(services, owner, cid)
-    assert rule.fired
+    assert rule.hits == 1
     run = run_of(store, owner, cid)
     assert run.status is RunStatus.IN_FLIGHT and run.handoff is Handoff.NONE  # authorized only
     assert runtime.calls_of("start") == []
@@ -244,6 +253,9 @@ def test_dispatch_authorization_that_was_durable_is_recognized_and_invoked_exact
     services, runtime, cid = system
     faults.arm("authorize_dispatch", AFTER_COMMIT)
     outcome = send(services, owner, cid)
+    assert (
+        faults.fired("authorize_dispatch", AFTER_COMMIT) == 1
+    )  # the intended transaction was hit, once
     assert outcome.run.status is RunStatus.SUCCEEDED
     assert len(runtime.calls_of("start")) == 1  # the unacknowledged T3 was not re-won or repeated
     run = run_of(store, owner, cid)
@@ -265,6 +277,9 @@ def test_handoff_marker_that_failed_before_durability_never_calls_start(
     faults.arm("mark_handoff_started", BEFORE_COMMIT)
     outcome = send(services, owner, cid)
     run = run_of(store, owner, cid)
+    assert (
+        faults.fired("mark_handoff_started", BEFORE_COMMIT) == 1
+    )  # the intended transaction was hit, once
     assert runtime.calls_of("start") == [] and runtime.calls_of("await_result") == []
     assert outcome.assistant_message is None
     assert run.status is RunStatus.FAILED and run.handoff is Handoff.NONE
@@ -283,6 +298,9 @@ def test_handoff_marker_that_was_durable_is_recognized_and_start_is_called_once(
     services, runtime, cid = system
     faults.arm("mark_handoff_started", AFTER_COMMIT)
     outcome = send(services, owner, cid)
+    assert (
+        faults.fired("mark_handoff_started", AFTER_COMMIT) == 1
+    )  # the intended transaction was hit, once
     assert outcome.run.status is RunStatus.SUCCEEDED
     assert len(runtime.calls_of("start")) == 1 and len(runtime.calls_of("await_result")) == 1
     assert run_of(store, owner, cid).handoff is Handoff.STARTED
@@ -303,6 +321,9 @@ def test_handoff_outcome_is_best_effort_and_never_changes_the_result(
     services, runtime, cid = system
     faults.arm("record_handoff_outcome", point)
     outcome = send(services, owner, cid)
+    assert (
+        faults.fired("record_handoff_outcome", point) == 1
+    )  # the intended transaction was hit, once
     assert outcome.run.status is RunStatus.SUCCEEDED
     assert len(runtime.calls_of("start")) == 1
     run = run_of(store, owner, cid)
@@ -338,6 +359,9 @@ def test_publication_that_was_durable_preserves_the_success_and_its_instants(
     services, runtime, cid = system
     faults.arm("publish_response", AFTER_COMMIT)
     outcome = send(services, owner, cid)
+    assert (
+        faults.fired("publish_response", AFTER_COMMIT) == 1
+    )  # the intended transaction was hit, once
     assert outcome.run.status is RunStatus.SUCCEEDED and outcome.assistant_message is not None
     history = store.get_history(owner, cid)
     stored = (history.messages[1], history.runs[0])
@@ -359,7 +383,7 @@ def test_repeated_unknown_publication_ends_in_b3_settlement_without_a_second_inv
     services, runtime, cid = system
     rule = faults.arm("publish_response", BEFORE_COMMIT, repeat=True)  # every attempt is unknown
     outcome = send(services, owner, cid)
-    assert rule.seen == 3  # bounded: exactly ``republish_attempts``
+    assert rule.seen == 3 and rule.hits == 3  # bounded: exactly ``republish_attempts``
     run = run_of(store, owner, cid)
     assert outcome.assistant_message is None
     assert run.status is RunStatus.FAILED and run.failure_code == "response_not_saved"
@@ -368,7 +392,7 @@ def test_repeated_unknown_publication_ends_in_b3_settlement_without_a_second_inv
     assert roles(store, owner, cid) == ["user"]
     assert len(runtime.calls_of("start")) == 1
     assert store.generation_state().quarantined_runs == ()  # settled on evidence: the slot is free
-    faults._rules.clear()
+    faults.disarm()
     retried = services.coordinator.retry(
         owner=owner,
         conversation_id=cid,
@@ -388,8 +412,9 @@ def test_publication_statement_failure_rolls_back_and_leaves_no_orphan_message(
     services, runtime, cid = system
     # The second statement of publication (the run update) fails every time: the message insert
     # of the same transaction must disappear with it.
-    faults.arm("publish_response", STATEMENT, pattern="UPDATE model_runs", repeat=True)
+    rule = faults.arm("publish_response", STATEMENT, pattern="UPDATE model_runs", repeat=True)
     outcome = send(services, owner, cid)
+    assert rule.hits == 3  # every one of the bounded publication attempts was rolled back
     run = run_of(store, owner, cid)
     assert outcome.assistant_message is None
     assert run.status is RunStatus.FAILED and run.failure_code == "response_not_saved"
@@ -409,6 +434,9 @@ def test_unknown_publication_with_an_unreadable_store_is_undetermined_and_change
     faults.arm("get_run", STATEMENT, pattern="BEGIN", nth=2)  # the read-back fails once
     with pytest.raises(StorageOutcomeUnknown):
         send(services, owner, cid)
+    assert (
+        faults.fired("publish_response", AFTER_COMMIT) == 1
+    )  # the intended transaction was hit, once
     assert faults.fired("get_run", STATEMENT) == 1
     run = run_of(store, owner, cid)  # the truth: the response was committed
     assert run.status is RunStatus.SUCCEEDED and roles(store, owner, cid) == ["user", "assistant"]
@@ -463,6 +491,9 @@ def test_failure_settlement_that_was_durable_is_recognized_not_repeated(
     faults.arm("settle_in_flight", AFTER_COMMIT)
     outcome = send(services, owner, cid)
     run = run_of(store, owner, cid)
+    assert (
+        faults.fired("settle_in_flight", AFTER_COMMIT) == 1
+    )  # the intended transaction was hit, once
     assert outcome.run.status is RunStatus.FAILED  # the real outcome
     assert run.state_version == baseline and run.settled_at is not None
     settled = frozen(run)
@@ -477,9 +508,10 @@ def test_failure_settlement_that_never_lands_holds_the_slot_until_evidence_exist
     runtime = failing(ScriptedRuntime())
     services = Services(store, runtime, boot_id="boot-1")
     cid = services.conversations.create_conversation(owner).id
-    faults.arm("settle_in_flight", BEFORE_COMMIT, repeat=True)
+    rule = faults.arm("settle_in_flight", BEFORE_COMMIT, repeat=True)
     with pytest.raises(StorageOutcomeUnknown):  # bounded attempts, then it is reported honestly
         send(services, owner, cid)
+    assert rule.hits == 3  # exactly ``republish_attempts`` settlement attempts, none durable
     stuck = run_of(store, owner, cid)
     assert stuck.status is RunStatus.IN_FLIGHT and stuck.termination_basis is None
     other = store.create_conversation(owner, None).id
@@ -487,7 +519,7 @@ def test_failure_settlement_that_never_lands_holds_the_slot_until_evidence_exist
         send(services, owner, cid)
     assert len(runtime.calls_of("start")) == 1  # nothing was re-invoked
 
-    faults._rules.clear()
+    faults.disarm()
     # Same boot: a reconcile cannot treat the guard as evidence, so the run is quarantined —
     # the slot is NOT released on a guess.
     same_boot = services.coordinator.reconcile()
@@ -545,6 +577,9 @@ def test_t7_that_was_durable_is_recognized_and_the_release_happens_once(
     faults.arm("settle_indeterminate", AFTER_COMMIT)
     report = actor.coordinator.reconcile()
     run = store.get_run(run_id)
+    assert (
+        faults.fired("settle_indeterminate", AFTER_COMMIT) == 1
+    )  # the intended transaction was hit, once
     assert report.settled == 1 and run.status is RunStatus.FAILED
     assert run.state_version == version + 1  # the retry saw a terminal run and wrote nothing
     settled = frozen(run)
@@ -557,14 +592,15 @@ def test_t7_that_never_lands_keeps_the_quarantine_and_a_later_reconcile_settles(
     store: SqliteStore, owner: UserId, faults: CommitFaultPlan
 ) -> None:
     cid, run_id, actor = external_quarantine(store, owner)
-    faults.arm("settle_indeterminate", BEFORE_COMMIT, repeat=True)
+    rule = faults.arm("settle_indeterminate", BEFORE_COMMIT, repeat=True)
     report = actor.coordinator.reconcile()  # contained: the fault does not escape reconcile
+    assert rule.hits == 3  # bounded attempts, none durable
     assert report.settled == 0 and report.still_unresolved == 1
     assert store.get_run(run_id).status is RunStatus.INDETERMINATE
     assert store.generation_state().quarantined_runs == (run_id,)  # the slot is still held
     with pytest.raises(RuntimeQuarantined):  # in any other conversation
         send(actor, owner, store.create_conversation(owner, None).id)
-    faults._rules.clear()
+    faults.disarm()
     assert actor.coordinator.reconcile().settled == 1
     assert store.get_run(run_id).status is RunStatus.FAILED
     assert send(actor, owner, cid).run.status is RunStatus.SUCCEEDED
@@ -580,6 +616,7 @@ def test_quarantining_commit_with_an_unknown_outcome_never_releases_the_slot(
     report = (
         services.coordinator.startup()
     )  # contained: startup does not fail on one unknown commit
+    assert faults.fired("mark_indeterminate", point) == 1  # the intended transaction was hit, once
     assert report.still_unresolved == 1 and report.settled == 0
     run = store.get_run(run_id)
     assert run.status in (RunStatus.IN_FLIGHT, RunStatus.INDETERMINATE)  # closed, never settled
@@ -587,6 +624,6 @@ def test_quarantining_commit_with_an_unknown_outcome_never_releases_the_slot(
     assert store.generation_state().quarantined_runs or run.status is RunStatus.IN_FLIGHT
     with pytest.raises((ConversationBusy, RuntimeQuarantined)):
         send(services, owner, store.create_conversation(owner, None).id)
-    faults._rules.clear()
+    faults.disarm()
     services.coordinator.reconcile()
     assert store.get_run(run_id).status is RunStatus.INDETERMINATE  # converged; still held

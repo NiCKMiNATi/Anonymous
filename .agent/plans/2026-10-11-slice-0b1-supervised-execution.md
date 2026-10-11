@@ -41,7 +41,8 @@ Behavior tests tied to acceptance criteria with relevant failure, preservation a
 - [x] Local commit (not pushed).
 - [x] Independent static code review (Codex): four findings (worker tracking HIGH; pending-admission race MEDIUM; missing COMMIT-boundary coverage MEDIUM; test accuracy LOW).
 - [x] 2026-10-11 Remediation of the four findings ([record](../../docs/implementation/slice-0b-1-remediation.md)): reservation-based thread registry, admission gate, COMMIT-boundary fault tests (27), settlement retry on unknown outcome, per-run reconcile containment, event-based test synchronization. 296 server tests; client 53 + review suite 7; lint/format/strict types/tsc/build clean. Committed locally; not pushed.
-- [ ] Independent re-review of the remediation diff only.
+- [x] Codex review of the remediation diff: `PASS_WITH_REQUIRED_FIXES`, three findings (watchdog reservation leak; AFTER_COMMIT assertions; SIGKILL synchronization). Fixed ([record §8](../../docs/implementation/slice-0b-1-remediation.md)); 302 server tests.
+- [ ] Final Codex check of the three-fix diff; development-host acceptance.
 - [ ] Owner confirmation of O1–O6; ADR-0013/0014 acceptance (they stay Proposed).
 - [ ] 0B-2 (not started; needs runtime evidence and the owner's model-download authorization).
 
