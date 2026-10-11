@@ -126,7 +126,7 @@ class RunWorker:
 
     def __call__(self) -> None:
         run_id = self._run.id
-        self._controls.mark_worker_live(run_id)
+        # The run was marked live at admission, atomically with its commit (admission gate).
         try:
             self._handle.complete(self._execute())
         except BaseException as error:  # delivered to the waiting caller, never swallowed
@@ -245,6 +245,7 @@ class RunWorker:
                 if time.monotonic() >= deadline:
                     self._settle_pending_quiet("runtime_busy")
                     return None
+                self._checkpoint("waiting_for_slot", run_id)
                 time.sleep(self._settings.slot_poll_seconds)
                 continue
             if transition.result is WriteResult.LEGACY_BLOCKED:

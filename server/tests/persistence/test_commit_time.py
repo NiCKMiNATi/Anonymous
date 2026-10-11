@@ -27,7 +27,6 @@ from __future__ import annotations
 import hashlib
 import sqlite3
 import threading
-import time
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -41,6 +40,7 @@ from anonymous.application.ports.model import ModelIdentity, ModelOutput, ModelR
 from anonymous.application.ports.persistence import SubmissionOutcome
 from anonymous.domain.errors import StorageOutcomeUnknown
 from anonymous.domain.ids import ConversationId, SubmissionId, UserId, new_uuid
+from tests.commit_faults import faulting_commits
 from tests.conftest import Services
 from tests.dispatching import dispatch
 from tests.doubles import BoundStore
@@ -126,7 +126,9 @@ def _run_when_blocked(
 
 
 def test_user_instant_reflects_when_the_write_lock_was_won_not_when_the_request_arrived(
-    db_path: Path, owner_and_conversation: tuple[UserId, ConversationId]
+    db_path: Path,
+    owner_and_conversation: tuple[UserId, ConversationId],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Delayed-commit fixture: the commit is delayed by lock contention, after the request began."""
     owner, cid = owner_and_conversation
@@ -135,8 +137,9 @@ def test_user_instant_reflects_when_the_write_lock_was_won_not_when_the_request_
     blocker = _hold_write_lock(db_path)
     reads_before = clock.reads
 
-    thread, result = _run_when_blocked(lambda: admit(store, owner, cid))
-    time.sleep(0.3)  # the request has arrived and is waiting on the lock
+    with faulting_commits(monkeypatch) as plan:
+        thread, result = _run_when_blocked(lambda: admit(store, owner, cid))
+        assert plan.write_begin_attempted.wait(5)  # the request has reached the write lock
     assert clock.reads == reads_before  # no instant was taken while waiting to commit
     clock.current = T0 + timedelta(minutes=5)  # the lock is won much later than arrival
     blocker.execute("COMMIT")
@@ -152,7 +155,9 @@ def test_user_instant_reflects_when_the_write_lock_was_won_not_when_the_request_
 
 
 def test_assistant_instant_reflects_publication_not_dispatch(
-    db_path: Path, owner_and_conversation: tuple[UserId, ConversationId]
+    db_path: Path,
+    owner_and_conversation: tuple[UserId, ConversationId],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     owner, cid = owner_and_conversation
     clock = ControlledClock()
@@ -162,8 +167,9 @@ def test_assistant_instant_reflects_publication_not_dispatch(
     blocker = _hold_write_lock(db_path)
     reads_before = clock.reads
 
-    thread, result = _run_when_blocked(lambda: store.publish_response(run.id, "answer"))
-    time.sleep(0.3)
+    with faulting_commits(monkeypatch) as plan:
+        thread, result = _run_when_blocked(lambda: store.publish_response(run.id, "answer"))
+        assert plan.write_begin_attempted.wait(5)  # the publisher has reached the write lock
     assert clock.reads == reads_before
     clock.current = T0 + timedelta(minutes=7)
     blocker.execute("COMMIT")

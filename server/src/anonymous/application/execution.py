@@ -20,8 +20,10 @@ from __future__ import annotations
 
 import hashlib
 import logging
+from collections.abc import Callable
 
 from anonymous.application.configuration import ConfigurationCatalog
+from anonymous.application.failures import public_message
 from anonymous.application.ports.model import ControlRouter, RuntimePort
 from anonymous.application.ports.persistence import ExecutionStore, HistorySource, SubmissionOutcome
 from anonymous.application.reconcile import Reconciler, ReconcileReport
@@ -30,11 +32,14 @@ from anonymous.application.supervisor import (
     Checkpoint,
     ControlRegistry,
     ExecutionSettings,
+    Reservation,
+    SpawnFailed,
+    SpawnRefused,
     ThreadRegistry,
     no_checkpoint,
 )
 from anonymous.application.worker import ExecutionHandle, RunWorker
-from anonymous.domain.errors import GenerationBlocked
+from anonymous.domain.errors import AnonymousError, GenerationBlocked
 from anonymous.domain.evidence import ClosureReason
 from anonymous.domain.ids import ConversationId, MessageId, SubmissionId, UserId
 from anonymous.domain.models import validate_message_content
@@ -66,9 +71,9 @@ class ExecutionCoordinator:
         self._checkpoint = checkpoint
         self._app_build = app_build or ComponentIdentity.label_only("anonymous-server")
         self.controls = ControlRegistry()
-        self.threads = ThreadRegistry()
+        self.threads = ThreadRegistry(lambda point: checkpoint(point, ""))
         self.settler = RunSettler(store, router, self._settings, self.controls, checkpoint)
-        self.reconciler = Reconciler(store, self.settler, self.controls, self._settings)
+        self.reconciler = Reconciler(store, self.settler, self.controls, self._settings, checkpoint)
 
     # -- lifecycle -----------------------------------------------------------------------------
 
@@ -76,16 +81,22 @@ class ExecutionCoordinator:
         return self.reconciler.startup()
 
     def reconcile(self) -> ReconcileReport:
-        return self.reconciler.reconcile()
+        reservation = self._reserve("reconcile")  # shutdown waits for an in-progress reconcile
+        try:
+            return self.reconciler.reconcile()
+        finally:
+            reservation.release()
 
     def shutdown(self, timeout_seconds: float | None = None) -> bool:
         """Stop admitting, close every active attempt, join the workers.
 
-        Returns ``True`` only if every supervised thread has terminated. If it returns ``False``
-        a worker is still alive (a hung runtime): the caller must NOT release process ownership;
-        the process must exit, which releases the guard and ends the worker with it.
+        Returns ``True`` only if every reservation has ended: every worker and watchdog that was
+        started, every worker that was reserved but not yet started, and every admission or
+        reconcile in progress. If it returns ``False`` something may still execute (a hung
+        runtime, or a thread whose start is unconfirmed): the caller must NOT release process
+        ownership; the process must exit, which releases the guard and ends the worker with it.
         """
-        self.threads.accepting = False
+        self.threads.begin_shutdown()
         live = self.controls.live_runs()
         for run_id in live:
             self.controls.control_for(run_id).closure_intent.set()
@@ -135,19 +146,16 @@ class ExecutionCoordinator:
         )
         if replay is not None:
             return self._finished(replay)  # resolves the original outcome; never starts work
-        self._require_accepting()
-        self.reconciler.maybe_reconcile()
-        admitted = self._store.admit_submission(
-            owner=owner,
-            conversation_id=conversation_id,
-            submission_id=submission_id,
-            content=content,
-            content_sha256=digest,
-            executable_digests=self._catalog.executable_digests(),
+        return self._admit_and_start(
+            lambda: self._store.admit_submission(
+                owner=owner,
+                conversation_id=conversation_id,
+                submission_id=submission_id,
+                content=content,
+                content_sha256=digest,
+                executable_digests=self._catalog.executable_digests(),
+            )
         )
-        if admitted.replayed:
-            return self._finished(admitted)
-        return self._spawn(admitted)
 
     def retry(
         self,
@@ -173,24 +181,23 @@ class ExecutionCoordinator:
         message_id: MessageId,
     ) -> ExecutionHandle:
         """Explicit retry: a new run on the SAME saved user message; never a new message."""
-        self._require_accepting()
-        self.reconciler.maybe_reconcile()
-        admitted = self._store.admit_retry(
-            owner=owner,
-            conversation_id=conversation_id,
-            retry_id=retry_id,
-            message_id=message_id,
-            executable_digests=self._catalog.executable_digests(),
+        return self._admit_and_start(
+            lambda: self._store.admit_retry(
+                owner=owner,
+                conversation_id=conversation_id,
+                retry_id=retry_id,
+                message_id=message_id,
+                executable_digests=self._catalog.executable_digests(),
+            )
         )
-        if admitted.replayed:
-            return self._finished(admitted)
-        return self._spawn(admitted)
 
     # -- internals ---------------------------------------------------------------------------
 
-    def _require_accepting(self) -> None:
-        if not self.threads.accepting:
-            raise GenerationBlocked("The server is shutting down; nothing was accepted.")
+    def _reserve(self, name: str) -> Reservation:
+        try:
+            return self.threads.reserve(name)
+        except SpawnRefused:
+            raise GenerationBlocked("The server is shutting down; nothing was accepted.") from None
 
     @staticmethod
     def _finished(outcome: SubmissionOutcome) -> ExecutionHandle:
@@ -198,8 +205,36 @@ class ExecutionCoordinator:
         handle.complete(outcome)
         return handle
 
-    def _spawn(self, admitted: SubmissionOutcome) -> ExecutionHandle:
-        handle = ExecutionHandle(admitted.run.id)
+    def _admit_and_start(self, admit: Callable[[], SubmissionOutcome]) -> ExecutionHandle:
+        """The single path for submissions and retries (design: remediation of review finding 2).
+
+        1. reserve — counts this request toward shutdown quiescence before anything is committed;
+        2. under the admission gate: commit the pending run, then mark it live (one atomic step as
+           far as orphan detection is concerned);
+        3. start the worker on the reservation.
+        """
+        reservation = self._reserve("admission")
+        try:
+            self.reconciler.maybe_reconcile()
+            with self.controls.admission_gate:
+                self._checkpoint("admission_gate_held", "")
+                admitted = admit()
+                if not admitted.replayed:
+                    self.controls.mark_worker_live(admitted.run.id)
+                self._checkpoint("admission_committed", admitted.run.id)
+        except BaseException:
+            reservation.release()  # nothing was started; an unknown commit leaves an orphan row
+            raise
+        if admitted.replayed:
+            reservation.release()
+            return self._finished(admitted)
+        return self._start_worker(admitted, reservation)
+
+    def _start_worker(
+        self, admitted: SubmissionOutcome, reservation: Reservation
+    ) -> ExecutionHandle:
+        run_id = admitted.run.id
+        handle = ExecutionHandle(run_id)
         worker = RunWorker(
             admitted=admitted,
             handle=handle,
@@ -213,9 +248,30 @@ class ExecutionCoordinator:
             boot_id=self._boot_id,
             checkpoint=self._checkpoint,
             app_build=self._app_build,
-            spawn_watchdog=lambda name, target: self.threads.spawn(name, target),
+            spawn_watchdog=reservation.spawn_child,
             is_accepting=lambda: self.threads.accepting,
         )
-        self.controls.mark_worker_live(admitted.run.id)  # live from the moment it is spawned
-        self.threads.spawn(f"anonymous-run-{admitted.run.id}", worker)
+        try:
+            reservation.start(worker, f"anonymous-run-{run_id}")
+        except SpawnFailed:
+            # Established: the worker never ran, so the run was never dispatched (B1). The
+            # reservation is still held while the run is settled; only then is it released.
+            logger.error("worker thread could not be started run=%s", run_id)
+            try:
+                self._store.settle_pending(
+                    run_id,
+                    "interrupted_before_dispatch",
+                    public_message("interrupted_before_dispatch"),
+                )
+                run, user, assistant = self._store.get_outcome(run_id)
+                handle.complete(
+                    SubmissionOutcome(
+                        user_message=user, run=run, assistant_message=assistant, replayed=False
+                    )
+                )
+            except AnonymousError as error:
+                handle.fail(error)
+            finally:
+                self.controls.mark_worker_done(run_id)
+                reservation.release()
         return handle

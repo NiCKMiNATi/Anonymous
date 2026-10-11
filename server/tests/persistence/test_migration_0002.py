@@ -228,6 +228,13 @@ def test_no_settlement_path_exists_for_binding_less_runs(db_path: Path) -> None:
     runs = populated(db_path)
     migrate(db_path)
     store = SqliteStore(db_path, ManualClock())
+    before = dump(db_path)  # the true "before": taken after migration, before every attempt
+    unresolved_before = {
+        r[0]: r[3]
+        for r in snapshot(db_path)["model_runs"]
+        if r[3] in ("in_flight", "indeterminate")
+    }
+    assert len(unresolved_before) == 4
     for name in ("in_flight_a", "indeterminate_a"):
         run_id = RunId(runs[name])
         for basis in EvidenceBasis:  # including a "scripted CONFIRMED_ENDED"-style basis
@@ -267,8 +274,15 @@ def test_no_settlement_path_exists_for_binding_less_runs(db_path: Path) -> None:
             )
     finally:
         conn.close()
-    assert snapshot(db_path)["model_runs"] == snapshot(db_path)["model_runs"]
-    assert {r[3] for r in snapshot(db_path)["model_runs"]} >= {"in_flight", "indeterminate"}
+    # Every refused attempt — through the store and through raw SQL — left the dataset
+    # byte-for-byte as it was before any attempt was made.
+    assert dump(db_path) == before
+    unresolved_after = {
+        r[0]: r[3]
+        for r in snapshot(db_path)["model_runs"]
+        if r[3] in ("in_flight", "indeterminate")
+    }
+    assert unresolved_after == unresolved_before
 
 
 def test_a_legacy_pending_run_is_provably_never_dispatched_and_settles_normally(

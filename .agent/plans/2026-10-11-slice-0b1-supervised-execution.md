@@ -39,12 +39,17 @@ Behavior tests tied to acceptance criteria with relevant failure, preservation a
 - [x] 2026-10-11 Implementation of 0B-1 (all listed items).
 - [x] 2026-10-11 Validation: 249 tests pass; lint, format, strict types clean; 15 repeated runs of the concurrency/process tests without failure.
 - [x] Local commit (not pushed).
-- [ ] Independent static code review. **Not performed.**
+- [x] Independent static code review (Codex): four findings (worker tracking HIGH; pending-admission race MEDIUM; missing COMMIT-boundary coverage MEDIUM; test accuracy LOW).
+- [x] 2026-10-11 Remediation of the four findings ([record](../../docs/implementation/slice-0b-1-remediation.md)): reservation-based thread registry, admission gate, COMMIT-boundary fault tests (27), settlement retry on unknown outcome, per-run reconcile containment, event-based test synchronization. 296 server tests; client 53 + review suite 7; lint/format/strict types/tsc/build clean. Committed locally; not pushed.
+- [ ] Independent re-review of the remediation diff only.
 - [ ] Owner confirmation of O1–O6; ADR-0013/0014 acceptance (they stay Proposed).
 - [ ] 0B-2 (not started; needs runtime evidence and the owner's model-download authorization).
 
 ## 9. Discoveries
 
+- (Review) A registry that decides "quiescent" from `Thread.is_alive()` forgets a worker that is registered but not yet running; ownership accounting must count reservations (see remediation record §1).
+- (Review) An admission is visible in the database before it is visible in memory; orphan detection must treat the gap as one atomic step with the commit.
+- (Remediation) Injecting faults at the real COMMIT showed that an unknown settlement outcome was not retried and that one run's storage fault aborted reconcile; both fixed.
 - The settlement trigger's first version accepted every basis for an unrecorded handoff outcome (SQL three-valued logic); caught by the parity test, fixed with `IS` comparisons.
 - Ordering runs by `requested_at` made a retry appear before the run it retried when the clock restarted; ordering is now insertion order.
 - In-process runtimes make two true statements that external runtimes do not: a returned call has ended, and a later boot holding the exclusive guard proves the owning process and its workers are gone. Both are scoped to the `owning_process` binding recorded at dispatch.

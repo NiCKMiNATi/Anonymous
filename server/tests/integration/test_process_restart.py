@@ -8,10 +8,11 @@ import signal
 import socket
 import subprocess
 import sys
+import threading
 import time
 import uuid
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from pathlib import Path
 
 import httpx2 as httpx
@@ -27,10 +28,22 @@ def free_port() -> int:
 
 
 @contextmanager
-def running_server(db_path: Path, port: int, *, kill: bool) -> Iterator[httpx.Client]:
+def running_server(
+    db_path: Path, port: int, *, kill: bool, delay: float = 0.0
+) -> Iterator[httpx.Client]:
     env = {**os.environ, "PYTHONUNBUFFERED": "1"}
     process = subprocess.Popen(
-        [sys.executable, "-m", "anonymous", "--port", str(port), "--db-path", str(db_path)],
+        [
+            sys.executable,
+            "-m",
+            "anonymous",
+            "--port",
+            str(port),
+            "--db-path",
+            str(db_path),
+            "--fake-delay-seconds",
+            str(delay),
+        ],
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         env=env,
@@ -89,6 +102,91 @@ def test_conversation_survives_server_restart(tmp_path: Path, kill: bool) -> Non
         )
         assert followup.status_code == 201
         assert len(client.get(f"/api/v1/conversations/{cid}").json()["messages"]) == 4
+
+
+def test_sigkill_during_generation_is_settled_on_restart_and_replays_without_a_second_run(
+    tmp_path: Path,
+) -> None:
+    """Maintained successor of the Slice 0A review probe "real process SIGKILL during inference":
+    the in-process runtime dies with the process, the next owner of the exclusive guard is the
+    evidence (B4), and nothing is invoked again."""
+    db_path, submission_id = tmp_path / "crash.sqlite3", str(uuid.uuid4())
+    with running_server(db_path, free_port(), kill=True, delay=30) as client:
+        cid = client.post("/api/v1/conversations", json={}).json()["id"]
+        posted = threading.Thread(
+            target=lambda: _post_ignoring_connection_loss(str(client.base_url), cid, submission_id),
+            daemon=True,
+        )
+        posted.start()
+        deadline = time.monotonic() + 20
+        while True:
+            before = client.get(f"/api/v1/conversations/{cid}").json()
+            if before["runs"] and before["runs"][0]["status"] == "in_flight":
+                break
+            assert time.monotonic() < deadline, "the run never reached the runtime"
+            time.sleep(0.02)
+    posted.join(20)  # the server was SIGKILLed on leaving the block above
+
+    with running_server(db_path, free_port(), kill=False) as client:
+        after = client.get(f"/api/v1/conversations/{cid}").json()
+        assert after["messages"] == before["messages"]  # the user message is intact
+        run = after["runs"][0]
+        assert run["status"] == "failed" and run["id"] == before["runs"][0]["id"]
+        assert run["termination_basis"] == "process_exit_verified"
+        replay = client.post(
+            f"/api/v1/conversations/{cid}/messages",
+            json={"submission_id": submission_id, "content": "crash input"},
+        )
+        assert replay.status_code == 200 and replay.json()["run"]["id"] == run["id"]
+        assert len(client.get(f"/api/v1/conversations/{cid}").json()["runs"]) == 1
+        followup = client.post(  # the conversation and the slot are free again
+            f"/api/v1/conversations/{cid}/messages",
+            json={"submission_id": str(uuid.uuid4()), "content": "next"},
+        )
+        assert followup.status_code == 201
+
+
+def test_a_durable_pending_run_is_settled_at_startup_without_inference(tmp_path: Path) -> None:
+    """Maintained successor of the Slice 0A review probe "startup settles a durable pending run":
+    a process died after admission and before any dispatch, so the next process proves B1."""
+    import hashlib
+
+    from anonymous.composition import build_application
+    from anonymous.config import Settings
+    from anonymous.domain.ids import SubmissionId
+
+    db_path, submission_id = tmp_path / "pending.sqlite3", str(uuid.uuid4())
+    app = build_application(Settings(db_path=db_path))
+    cid = app.conversations.create_conversation(app.owner).id
+    accepted = app.store.admit_submission(
+        owner=app.owner,
+        conversation_id=cid,
+        submission_id=SubmissionId(submission_id),
+        content="pending input",
+        content_sha256=hashlib.sha256(b"pending input").hexdigest(),
+    )  # committed; no worker ever existed for it
+    assert app.shutdown()
+
+    with running_server(db_path, free_port(), kill=False) as client:
+        replay = client.post(
+            f"/api/v1/conversations/{cid}/messages",
+            json={"submission_id": submission_id, "content": "pending input"},
+        ).json()
+        assert replay["replayed"] and replay["user_message"]["id"] == accepted.user_message.id
+        assert replay["run"]["status"] == "failed"
+        assert replay["run"]["failure_code"] == "interrupted_before_dispatch"
+        assert replay["run"]["termination_basis"] == "never_dispatched"
+        assert replay["assistant_message"] is None  # nothing was generated
+
+
+def _post_ignoring_connection_loss(base_url: str, cid: str, submission_id: str) -> None:
+    # A client of its own: the server's death resets this connection at once, instead of the
+    # request waiting out a read timeout on a connection pool the test also closes.
+    with suppress(httpx.TransportError), httpx.Client(base_url=base_url, timeout=60) as own:
+        own.post(
+            f"/api/v1/conversations/{cid}/messages",
+            json={"submission_id": submission_id, "content": "crash input"},
+        )
 
 
 def test_second_server_on_the_same_database_refuses_to_start(tmp_path: Path) -> None:

@@ -82,11 +82,14 @@ def test_closure_waits_for_a_paused_invoker_and_start_precedes_the_closure(
     assert held.wait_reached()
     run_id = handle.run_id
 
+    reached = threading.Event()
+    scheduler.hooks["closure_waiting_for_gate"] = lambda _run: reached.set()
     closer, _ = in_thread(
         lambda: services.coordinator.settler.close_and_verify(run_id, ClosureReason.DEADLINE)
     )
-    time.sleep(0.2)
-    assert closer.is_alive()  # the closer is blocked on the handoff gate
+    assert reached.wait(5)  # the closer has reached the handoff gate ...
+    gate = services.coordinator.controls.control_for(run_id).handoff_gate
+    assert gate.locked()  # ... which the paused invoker still holds, so it cannot pass
     assert store.get_run(run_id).closed_at is None  # no closure has been committed
     assert runtime.calls_of("start") == []  # and nothing has reached the runtime
 
@@ -131,17 +134,20 @@ def test_closure_first_means_start_is_never_called_and_no_external_action_occurs
 
 
 def test_stop_cannot_overlap_a_start_in_progress(store: SqliteStore, owner: UserId) -> None:
-    services, runtime, _, cid = fixture(store, owner)
+    services, runtime, scheduler, cid = fixture(store, owner)
     runtime.start_gate.arm()
     runtime.await_gate.arm()
     handle = start_run(services, owner, cid)
     assert runtime.start_gate.wait_entered()  # the handoff is in progress, holding the gate
     run_id = handle.run_id
+    reached = threading.Event()
+    scheduler.hooks["closure_waiting_for_gate"] = lambda _run: reached.set()
     closer, _ = in_thread(
         lambda: services.coordinator.settler.close_and_verify(run_id, ClosureReason.SHUTDOWN)
     )
-    time.sleep(0.2)
-    assert closer.is_alive()
+    assert reached.wait(5)  # the closer is at the gate, which the in-progress start still holds
+    assert services.coordinator.controls.control_for(run_id).handoff_gate.locked()
+    assert store.get_run(run_id).closed_at is None
     assert runtime.calls_of("stop") == []  # stop is not sent while start is in progress
     runtime.start_gate.release()
     assert runtime.await_gate.wait_entered()
@@ -463,13 +469,15 @@ def test_a_known_terminal_failure_from_another_instance_is_possibly_active(
 def test_a_pending_run_waiting_for_capacity_holds_no_slot_and_proceeds_on_release(
     store: SqliteStore, owner: UserId
 ) -> None:
-    services, runtime, _, first_cid = fixture(store, owner)
+    services, runtime, scheduler, first_cid = fixture(store, owner)
     second_cid = services.conversations.create_conversation(owner).id
     runtime.await_gate.arm()
     first = start_run(services, owner, first_cid, "one")
     assert runtime.await_gate.wait_entered()
+    at_slot = threading.Event()
+    scheduler.hooks["waiting_for_slot"] = lambda _run: at_slot.set()
     second = start_run(services, owner, second_cid, "two")
-    time.sleep(0.2)
+    assert at_slot.wait(5)  # the second worker has tried the slot and found it busy
     waiting = store.get_run(second.run_id)
     assert waiting.status is RunStatus.PENDING and waiting.slot_id is None  # admission only
     assert store.get_run(first.run_id).slot_id == services.coordinator._settings.slot_id

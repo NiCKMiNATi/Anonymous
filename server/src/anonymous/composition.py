@@ -55,7 +55,7 @@ class Application:
         if not finished:
             logger.error("shutdown incomplete: a supervised worker is still alive; ownership kept")
             return False
-        self.guard.release_when_quiescent(lambda: bool(self.execution.threads.alive()))
+        self.guard.release_when_quiescent(lambda: bool(self.execution.threads.outstanding()))
         return not self.guard.held
 
 

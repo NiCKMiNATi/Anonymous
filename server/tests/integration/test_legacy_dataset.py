@@ -44,6 +44,7 @@ def test_unresolved_legacy_runs_block_all_dispatch_and_nothing_resolves_them(
     legacy: tuple[Path, dict[str, str]], model: RecordingModel | None
 ) -> None:
     path, runs = legacy
+    before = raw_snapshot(path)  # the dataset exactly as 0A left it, before any startup
     # ``None`` runs the shipped FakeModelAdapter, whose label equals the legacy rows' runtime_id:
     # a matching label is not evidence, so nothing is resolved.
     app = build_application(Settings(db_path=path), model=model, execution_settings=FAST)
@@ -88,11 +89,17 @@ def test_unresolved_legacy_runs_block_all_dispatch_and_nothing_resolves_them(
     finally:
         assert app.shutdown()
     # Every legacy unresolved row is byte-for-byte what 0A left, after startup and shutdown.
-    rows = {r[0]: r for r in raw_snapshot(path)["model_runs"]}
-    for name in ("in_flight_a", "in_flight_b", "indeterminate_a", "indeterminate_b"):
-        assert rows[runs[name]][3] in ("in_flight", "indeterminate")
+    after = raw_snapshot(path)
+    assert unresolved_rows(after) == unresolved_rows(before)  # identical, column for column
+    assert len(unresolved_rows(before)) == 4
+    for table in ("users", "conversations", "messages", "submissions"):
+        assert after[table] == before[table]  # history is untouched
+    rows = {r[0]: r for r in after["model_runs"]}
     pending = rows[runs["pending"]]
     assert pending[3] == "failed" and pending[6] == "interrupted_before_dispatch"
+    assert {k: v for k, v in rows.items() if k != runs["pending"]} == {
+        r[0]: r for r in before["model_runs"] if r[0] != runs["pending"]
+    }  # the only run that changed is the provably never-dispatched one
 
 
 def test_repeated_restarts_change_nothing_and_the_block_persists(

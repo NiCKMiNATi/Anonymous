@@ -18,7 +18,7 @@
 - Control addresses the persisted binding only; mismatching output is rejected, fences the run and is never evidence; a model mismatch from the verified instance is B3.
 - The slot is `slot_id` on the run, unique among `in_flight`/`indeterminate`; `pending` holds none; quarantine blocks all dispatch; reconcile never acquires it.
 - Legacy rows are untouched by migration; no settlement path exists for binding-less runs; the migration stops safely only on structural inconsistency.
-- The guard is released only when no supervised thread is alive; shutdown reports incomplete otherwise and `__main__` exits the process.
+- The guard is released only when no supervised reservation is outstanding (started or not); shutdown reports incomplete otherwise and `__main__` exits the process. *(Corrected after review: the original wording "no thread alive" was the defect; see [the remediation record](../implementation/slice-0b-1-remediation.md).)*
 
 ## Claims to challenge
 

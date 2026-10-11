@@ -905,3 +905,11 @@ Any real runtime or model download; llama.cpp specifics; real external B3–B5 p
 - **Default dataset file** is now `anonymous-0b1-dev.sqlite3`: 0B-1 execution tests use a clean database and never execute against a legacy one.
 - **API surface:** a retry route and a `generation` block in `/health`; no adoption or reconcile route (application-level only).
 - **Codex's 0A review probes** (`server/review_tests/`) are pinned to the 0A API (`recover_unsettled_runs`, `record_dispatch`) and are not part of the suite; 15 of 18 fail against 0B-1 for that reason alone.
+
+### 17.1 Remediation after the static review of 0B-1 (2026-10-11)
+
+Four findings were fixed without changing this design ([record](../implementation/slice-0b-1-remediation.md)). Implementation-level rules the design relies on, now explicit:
+
+- **Ownership accounting (supports §4.8, B4).** Supervised work is counted by *reservation* before it can begin and released only after it has certainly ended; "not alive yet" is never "ended". Shutdown forbids new top-level reservations and waits for all of them; the guard is released only when none is outstanding. A thread start that cannot be shown not to have started keeps ownership (shutdown reports incomplete).
+- **Pending admission (supports §5.3).** A `pending` run is *abandoned* only if it has no live worker **and** no admission is between its commit and its live mark; both facts are read under one process-wide admission gate. Applies identically to submissions, retries, startup and request-triggered reconcile.
+- **Unknown settlement outcome (supports §9, T5/T7).** A commit of unknown outcome is resolved by reading the run and, if it did not land, applying the *same* evidence again (bounded); a run that still cannot be resolved stays as stored. Reconcile contains one run's storage fault so the others (and startup) proceed.

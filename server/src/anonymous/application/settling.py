@@ -30,6 +30,7 @@ from anonymous.application.supervisor import (
     ControlRegistry,
     ExecutionSettings,
 )
+from anonymous.domain.errors import StorageOutcomeUnknown
 from anonymous.domain.evidence import (
     ClosureReason,
     CompletionObserved,
@@ -84,31 +85,43 @@ class RunSettler:
         adapter_message: str | None = None,
     ) -> Transition | None:
         """Settle on ``basis`` with T5 (``in_flight``) or T7 (``indeterminate``), re-reading and
-        retrying on a stale version. Repeated or concurrent calls are idempotent."""
+        retrying on a stale version. Repeated or concurrent calls are idempotent.
+
+        A commit whose outcome is unknown is resolved by reading the run again: if the write landed
+        the run is terminal and nothing more is done; if it did not, the same evidence is applied
+        again (same source predicate, same ``expected_version``), so it can land at most once. The
+        retries are bounded; a run that still cannot be resolved stays as it is (conservative)."""
         message = public_message(code, adapter_message)
+        unknown = 0
         for _ in range(_MAX_VERSION_RETRIES):
             run = self._store.get_run(run_id)
-            if run.status is RunStatus.IN_FLIGHT:
-                result = self._store.settle_in_flight(
-                    run_id,
-                    basis=basis,
-                    code=code,
-                    message=message,
-                    completion=completion,
-                    reason=reason,
-                    expected_version=run.state_version,
-                )
-            elif run.status is RunStatus.INDETERMINATE:
-                result = self._store.settle_indeterminate(
-                    run_id,
-                    basis=basis,
-                    code=code,
-                    message=message,
-                    completion=completion,
-                    expected_version=run.state_version,
-                )
-            else:
-                return None
+            try:
+                if run.status is RunStatus.IN_FLIGHT:
+                    result = self._store.settle_in_flight(
+                        run_id,
+                        basis=basis,
+                        code=code,
+                        message=message,
+                        completion=completion,
+                        reason=reason,
+                        expected_version=run.state_version,
+                    )
+                elif run.status is RunStatus.INDETERMINATE:
+                    result = self._store.settle_indeterminate(
+                        run_id,
+                        basis=basis,
+                        code=code,
+                        message=message,
+                        completion=completion,
+                        expected_version=run.state_version,
+                    )
+                else:
+                    return None
+            except StorageOutcomeUnknown:
+                unknown += 1
+                if unknown >= self._settings.republish_attempts:
+                    raise
+                continue
             if result.result in (WriteResult.STALE_VERSION, WriteResult.ALREADY_INDETERMINATE):
                 continue
             return result
@@ -133,6 +146,7 @@ class RunSettler:
 
     def _close_under_gate(self, run: ModelRun, reason: ClosureReason) -> bool:
         control = self._controls.control_for(run.id)
+        self._checkpoint("closure_waiting_for_gate", run.id)  # about to contend for the gate
         if not control.handoff_gate.acquire(timeout=self._settings.closure_gate_wait_seconds):
             logger.error("handoff gate stuck run=%s; closure not committed", run.id)
             return False
