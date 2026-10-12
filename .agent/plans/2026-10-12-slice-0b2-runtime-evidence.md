@@ -2,7 +2,7 @@
 
 ## 1. Title, status, and purpose
 
-**Status: PROPOSED — plan only, not started, not authorized to execute.** Nothing here authorizes a model download, any application code, or execution beyond the owner's separate instruction.
+**Status: ACTIVE — E1 executed 2026-10-12 (owner-authorized); E2 and E3 NOT authorized and not started.** The owner approved E1 only: no model download or loading, loopback only, synthetic data. Model-based evidence (E2/E3) needs a separate authorization with the download cap; the owner's proposed cap is 3 GiB for one official Qwen3-4B-Q4_K_M GGUF artifact shared with the feasibility experiment, **not yet an authorization to download**. E1 evidence: [report](../../docs/evidence/v0-0b2-e1-process-ownership-termination.md).
 
 **Problem.** Slice 0B-1 is closed against a *scripted, in-process* runtime. Every release basis that matters for a real runtime (B3 terminal result from the bound instance, B4 verified process exit, B5 instance-reported end, `late_delivery_excluded`) has no real producer, and the design says so ([LD-04 design §14](../../docs/design/ld-04-execution-lifecycle.md) rows `BLOCKED_BY_RUNTIME_EVIDENCE`). Until measured, an external runtime that cannot be shown to have stopped keeps the single slot quarantined (O1, ratified).
 
@@ -75,23 +75,26 @@ Per acceptance criterion: each verdict cites trial counts and raw-artifact hashe
 
 ## 8. Progress
 
-- [x] 2026-10-12 Plan written (this file). Not started.
-- [ ] Owner review of the plan; answers to Q1–Q5.
-- [ ] E0 gate.
-- [ ] E1 (first experiment).
-- [ ] E1 evidence record and review.
-- [ ] Owner authorization of model and size cap (separate).
+- [x] 2026-10-12 Plan written (this file).
+- [x] 2026-10-12 Owner answered Q1/Q2/Q5 in part: shared artifact and budget with the feasibility experiment; proposed cap 3 GiB, one artifact; the earlier unknown cap superseded prospectively; actual download still needs separate authorization. Q3 (controller-owned process) and Q4 (script location: `tools/evidence/runtime/`, used) remain open for the owner.
+- [x] 2026-10-12 E0 gate read: battery 70%, memory pressure level 2 (deviation from the plan's abort rule, recorded; E1 used only small processes).
+- [x] 2026-10-12 E1 executed: 772 trials, 0 failed checks, clean final audit; real pid reuse obtained twice; llama-server b11440 probed without a model (kept separate).
+- [x] 2026-10-12 E1 evidence record written. Independent review not requested (owner: not needed unless a high-risk architectural issue emerges; none did, but see the residual in report F6).
+- [ ] Owner decision on the partial model file and the discovery items (report §8); owner authorization of the model download and size cap (separate; E2 blocked until then).
 - [ ] E2, E3.
 - [ ] Synthesis and recommendation for a 0B-2 implementation plan.
 
 ## 9. Discoveries
 
-None yet. Known going in: llama.cpp b11440 was acquired and verified but never launched as a server; no model weights exist locally; the feasibility experiment's download cap is unrecovered.
+- **Partial model file.** `models/Qwen3-4B-Q4_K_M.gguf.partial` (1,786,773,504 bytes, 2026-10-06 22:38) exists in the bench folder although the feasibility evidence says no model bytes were downloaded. Untouched, unverified. The bench manifest also holds a recovered authorization record (12,000,000,000-byte ceiling, ≤ 2 artifacts) that the repository evidence says was unrecoverable; the owner's 3 GiB / one-artifact decision supersedes it prospectively.
+- **E1 headline.** A conditional B4 basis is feasible for a single-process, non-detaching runtime spawned and recorded by Anonymous; ambiguous or unverified bindings must stay `INDETERMINATE`; a detached, environment-scrubbing descendant spawned after binding cannot be detected (report F6).
+- **Tooling facts.** Children survive owner SIGKILL (reparented to pid 1); a pipe-EOF watchdog stops them in ≤ 4.2 ms; SIGTERM is ignored by a SIGSTOPped process, SIGKILL is not; `ps -axeww` hides environments on macOS 27, `KERN_PROCARGS2` reads them.
+- **llama-server b11440 without a model** starts in router mode (`role: router`, `max_instances: 4`), needs ~6.7 s to listen, is one process when idle, and exits on SIGTERM in ~11 ms. Whether router mode's per-model children detach or inherit the environment is the key E2 question.
 
 ## 10. Decision log
 
-2026-10-12 — Run the model-free E1 first. Rationale: it is independent of runtime internals, needs no authorization beyond loopback execution of a disposable child, and decides whether the O1 branch "controller-owned process" is needed. Alternative considered: start with the real runtime and model (rejected: blocked by the download authorization and would test control and ownership together, making results hard to attribute). Status: proposal. No ADR is created or implied; any architectural consequence goes through an ADR after the evidence exists.
+2026-10-12 — Owner approved E1; run the model-free E1 first. Rationale: it is independent of runtime internals, needs no authorization beyond loopback execution of a disposable child, and decides whether the O1 branch "controller-owned process" is needed. Alternative considered: start with the real runtime and model (rejected: blocked by the download authorization and would test control and ownership together, making results hard to attribute). Status: proposal. No ADR is created or implied; any architectural consequence goes through an ADR after the evidence exists.
 
 ## 11. Final outcome
 
-Not applicable — plan only; nothing executed, no evidence gathered, no claim made about any external runtime.
+**Partial (E1 complete; E2, E3 and synthesis outstanding).** E1 ran as planned and is recorded in the [E1 report](../../docs/evidence/v0-0b2-e1-process-ownership-termination.md) with sanitized raw data under `docs/evidence/v0-0b2-e1/` and scripts under `tools/evidence/runtime/`. Deviations: battery power and memory-pressure level 2 at the E0 gate (recorded); two design iterations after a smoke run (report §1). No model was downloaded or loaded, nothing left loopback, no application code or accepted 0B-1 semantics changed. Remaining limitations: stand-in only (llama.cpp behavior unmeasured beyond the model-less probe), macOS only, same-user visibility, residual F6, `lsof` timeout path unexercised, sandbox effectiveness unverified. Next: owner decisions (report §7–8), then a separately authorized E2.

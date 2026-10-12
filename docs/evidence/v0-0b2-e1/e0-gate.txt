@@ -1,0 +1,6 @@
+start 2026-10-12T12:03:10Z
+Now drawing from 'Battery Power'
+ -InternalBattery-0 (id=29950051)	70%; discharging; 10:21 remaining present: true
+kern.memorystatus_vm_pressure_level: 2
+System-wide memory free percentage: 43%
+end-of-run check (2026-10-12 ~12:21Z): kern.memorystatus_vm_pressure_level=2, power source Battery

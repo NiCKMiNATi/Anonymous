@@ -1,0 +1,152 @@
+{
+ "binary_version": [
+  "version: 0.6.0-dev (build 11440, commit 1a3011cc0)",
+  "built with AppleClang 21.0.0.21000101 for Darwin arm64"
+ ],
+ "command": [
+  "llama-server",
+  "--host",
+  "127.0.0.1",
+  "--port",
+  "57767",
+  "--offline",
+  "--no-webui"
+ ],
+ "sandbox_profile": "(version 1)(allow default)(deny network-outbound)(allow network-outbound (remote ip \"localhost:*\"))",
+ "spawned_pid": 32324,
+ "exited_by_itself": false,
+ "exit_code": null,
+ "listening_after_s": 6.736728667,
+ "samples": [
+  {
+   "t": 0.04,
+   "listeners": [],
+   "descendants": []
+  },
+  {
+   "t": 0.7,
+   "listeners": [],
+   "descendants": []
+  },
+  {
+   "t": 1.41,
+   "listeners": [],
+   "descendants": []
+  },
+  {
+   "t": 2.07,
+   "listeners": [],
+   "descendants": []
+  },
+  {
+   "t": 2.8,
+   "listeners": [],
+   "descendants": []
+  },
+  {
+   "t": 3.49,
+   "listeners": [],
+   "descendants": []
+  },
+  {
+   "t": 4.04,
+   "listeners": [],
+   "descendants": []
+  },
+  {
+   "t": 4.57,
+   "listeners": [],
+   "descendants": []
+  },
+  {
+   "t": 5.12,
+   "listeners": [],
+   "descendants": []
+  },
+  {
+   "t": 5.65,
+   "listeners": [],
+   "descendants": []
+  },
+  {
+   "t": 6.19,
+   "listeners": [],
+   "descendants": []
+  },
+  {
+   "t": 6.74,
+   "listeners": [
+    32324
+   ],
+   "descendants": []
+  }
+ ],
+ "identity": {
+  "pid": 32324,
+  "start": [
+   1791807633,
+   616134
+  ],
+  "ppid": 32319,
+  "pgid": 32324,
+  "status": "run"
+ },
+ "listener_pids": [
+  32324
+ ],
+ "spawned_pid_is_listener": true,
+ "http": {
+  "/health": {
+   "status_line": "HTTP/1.1 200 OK",
+   "body_len": 15,
+   "body_head": "{\"status\":\"ok\"}"
+  },
+  "/props": {
+   "status_line": "HTTP/1.1 200 OK",
+   "body_len": 239,
+   "body_head": "{\"role\":\"router\",\"max_instances\":4,\"models_autoload\":true,\"model_alias\":\"llama-server\",\"model_path\":\"none\",\"default_generation_settings\":{\"params\":null,\"n_ctx\":0},\"ui_settings\":{},\"build_info\":\"b11440"
+  },
+  "/v1/models": {
+   "status_line": "HTTP/1.1 200 OK",
+   "body_len": 27,
+   "body_head": "{\"data\":[],\"object\":\"list\"}"
+  }
+ },
+ "descendant_count": 0,
+ "classify_while_running": {
+  "verdict": "PROVEN_ALIVE",
+  "why": [
+   "recorded (pid, start) is live"
+  ],
+  "tagged_live": [
+   32324
+  ]
+ },
+ "sigterm_exit_s": 0.010707208000001245,
+ "sigterm_exit_observed": true,
+ "descendants_alive_after_main_exit": [],
+ "classify_after_sigterm": {
+  "verdict": "PROVEN_TERMINATED",
+  "why": [
+   "kernel reports no process at the recorded pid"
+  ],
+  "listeners": [],
+  "tagged_live": []
+ },
+ "output_head": [
+  "0.00.000.727 I srv  llama_server: initializing ...",
+  "0.06.370.323 I cmn  common_param: common_params_print_info: verbosity = 3 (adjust with the `-lv N` CLI arg)",
+  "0.06.370.605 I srv  init_listene: The UI is disabled",
+  "0.06.370.609 I srv  init_listene: Use --ui/--no-ui (or deprecated --webui/--no-webui) to enable/disable",
+  "0.06.371.812 I srv    operator(): Available models (0):",
+  "0.06.371.815 I srv    operator():   no models found on the system (visit https://llama.app/models for suggestions)",
+  "0.06.371.923 W srv  llama_server: security: no API key is set and CORS allows all origins (see https://github.com/ggml-org/llama.cpp/pull/25655)",
+  "0.06.371.941 W srv  llama_server: security: router mode enabled - do not expose to untrusted environments",
+  "0.06.371.944 I srv  llama_server: starting server in router mode. models will be automatically loaded on-demand",
+  "0.06.373.362 I srv  llama_server: listening on http://127.0.0.1:57767",
+  "0.08.434.114 I srv    operator(): operator(): cleaning up before exit..."
+ ],
+ "output_lines_total": 11,
+ "remaining_tagged_after_cleanup": [],
+ "cache_dir_empty_after": true
+}
