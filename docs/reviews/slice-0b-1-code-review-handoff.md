@@ -1,5 +1,7 @@
 # Slice 0B-1 — Codex static code-review handoff
 
+**Historical handoff — superseded 2026-10-12.** The review it requested was performed (findings remediated; final diff `PASS`). The accepted outcome is in the [acceptance handoff](slice-0b-1-acceptance-handoff.md) and the [independent review record](slice-0b-1-independent-review-record.md); the text below is kept unchanged as the handoff as prepared.
+
 **Status:** prepared 2026-10-11. **No independent review has been performed.** Static review only: do not run tests, do not edit files; report findings with severity, file:line and a concrete failure scenario. Base `01e9f46`; head is the local commit that contains this file (`git log -1`; nothing is pushed). The LD-04 design (revision 3.1), ADR-0013/0014 (Proposed) and their review handoff are in the same commit.
 
 ## Read in this order

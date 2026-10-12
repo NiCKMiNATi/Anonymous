@@ -1,6 +1,6 @@
 # Slice 0B-1 — concurrency and transaction-boundary remediation (implementation record)
 
-**Status:** implemented and tested locally, 2026-10-11, on top of `ecef413`. Design (LD-04 revision 3.1) and ADR-0013/0014 are unchanged and remain **Proposed**. Scope: the four findings of the 0B-1 static review (worker tracking, pending admission, SQLite COMMIT boundaries, test accuracy). No 0B-2 work, no external runtime, no design change.
+**Status:** implemented and tested locally, 2026-10-11, on top of `ecef413`. Design (LD-04 revision 3.1) and ADR-0013/0014 were unchanged by this remediation and were **Proposed** when it was written; they were **Accepted for 0B-1 scope on 2026-10-12** and Slice 0B-1 is closed on the development host ([acceptance handoff](../reviews/slice-0b-1-acceptance-handoff.md)). Scope: the four findings of the 0B-1 static review (worker tracking, pending admission, SQLite COMMIT boundaries, test accuracy). No 0B-2 work, no external runtime, no design change.
 
 ## 1. Root causes and fixes
 

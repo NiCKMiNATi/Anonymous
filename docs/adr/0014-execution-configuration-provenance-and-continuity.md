@@ -1,7 +1,7 @@
 # ADR-0014 — Conversation configuration binding, provenance identity and cross-version continuity
 
-**Status: Proposed (revision 3).** Revision 1 was recorded as "Accepted for Slice 0B planning" on author review only and contained only per-run version attribution. The first independent review required a conversation-level configuration binding (F5) and verifiable identities (F6). The second review accepted F6 as resolved and found F5's legacy handling insufficient (the baseline was compared only with another new implementation). The status stays **Proposed** until the revised design receives independent review and the owner confirms; Claude's own checks are not independent acceptance.
-**Date:** 2026-10-11 (revision 3).
+**Status: Accepted (revision 3.1 review basis), for Slice 0B-1 scope only — 2026-10-12.** Accepted by the owner after an independent review of the ADR-0013/0014 revision 3.1 design that returned `PASS_WITH_ADVISORIES` with no blocking finding (both advisories corrected in documentation; see the [review record](../reviews/slice-0b-1-independent-review-record.md)), an independent implementation review that returned `PASS`, and development-host verification on macOS. Earlier history: revision 1 was recorded as "Accepted for Slice 0B planning" on author review only and contained only per-run version attribution; the first independent review required a conversation-level configuration binding (F5) and verifiable identities (F6); the second review accepted F6 and found F5's legacy handling insufficient. **Acceptance covers the decisions and their 0B-1 implementation (scripted, in-process runtime; application-level adoption; one shipped configuration).** It does not accept: any digest or version reporting by a real runtime or model artifact (runtime evidence), a persona, Memory or configuration editor, an adoption route or UI, or the draft requirement wording of [NFR-08](../02-requirements.md), which keeps its own status (see the acceptance record).
+**Date:** 2026-10-11 (revision 3); accepted 2026-10-12.
 
 ## Context
 
@@ -13,7 +13,7 @@ LM-01, ADR-0006, FR-15, V0-D03 (no permanent duplicated prompts, no replay-perfe
 
 ## Implementation status (Slice 0B-1)
 
-Implemented for 0B-1: content-addressed manifests, append-only conversation bindings, explicit adoption (application level), startup binding of legacy conversations only after the golden replay, run provenance with verification states, and the golden self-test (see the [implementation record](../implementation/slice-0b-1.md)). The ADR **stays Proposed** pending independent review of the implementation.
+Implemented for 0B-1: content-addressed manifests, append-only conversation bindings, explicit adoption (application level), startup binding of legacy conversations only after the golden replay (digest check plus FX-01–FX-06; FX-07 is verified by the test suite), run provenance with verification states, and the golden self-test (see the [implementation record](../implementation/slice-0b-1.md)). The implementation had independent static review (final diff `PASS`) and passed development-host verification on macOS; nothing is verified on a real runtime, Windows or iPhone.
 
 ## Alternatives considered
 
@@ -25,7 +25,7 @@ Implemented for 0B-1: content-addressed manifests, append-only conversation bind
 - **Leave legacy 0A conversations unbound and always require adoption.** Considered; it blocks every old conversation until an adoption surface exists. Preferred instead: bind at startup **only after** the baseline reproduces the real 0A behavior; otherwise require adoption (O2).
 - **Guarantee equivalent output across models.** Not achievable.
 
-## Decision (revised proposal, revision 3)
+## Decision (revision 3, accepted for 0B-1 scope)
 
 1. **Three continuity classes** (data preservation, configuration preservation, non-guaranteed behavior) are stated in NFR-08.
 2. **Effective configuration.** The context-construction and behavior configuration used to build a request is an immutable manifest identified by its **content digest** (insert-only, verified on read). V0 ships one (whole-history context, no system instructions, behavior explicitly `none`).
@@ -46,9 +46,15 @@ Additive persistence and composition work in 0B-1: golden-fixture replay (test a
 
 Availability of model-artifact and runtime-build digests and version reports from the chosen runtime; soundness of any cached-digest staleness check.
 
-## Owner-facing items needing confirmation
+## Owner decisions (ratified 2026-10-12)
 
-O2 (startup binding of legacy conversations to `E0` after the golden check, versus always requiring adoption) and O3 (sends refused before saving while configuration-blocked). See [design §14](../design/ld-04-execution-lifecycle.md).
+- **O2 — approved.** Automatic startup binding is permitted only for eligible, previously unbound pre-0B conversations, and only after the documented baseline verification (fixture digest and the golden replay). An existing binding is never silently replaced. Explicit adoption remains mandatory for changes, for unverifiable equivalence and for unavailable configurations. Startup binding must not retroactively attribute unrecorded model provenance to historical messages or runs: legacy runs stay `unrecorded`, and the binding states a fact about the constructed view only. This matches Decision 8 and the implementation (`bind_legacy_conversations` inserts bindings only for legacy conversations that have none and writes nothing to runs or messages; `test_configuration.py` asserts historical provenance stays unrecorded).
+- **O3 — approved.** While the slot is quarantined or the pinned configuration is unavailable, an inadmissible send is refused before the user message is saved; the client preserves the unsent draft on a definite refusal (the generic restore path exists and is tested for `conversation_busy`; dedicated presentation and tests for the new refusal codes are follow-up work, not an acceptance condition).
+- Execution-lifecycle decisions O1, O4, O5 and O6 are recorded in [ADR-0013](0013-execution-attempt-lifecycle-and-release-evidence.md). See [design §14](../design/ld-04-execution-lifecycle.md).
+
+## Acceptance record (2026-10-12)
+
+Independent review: design `PASS_WITH_ADVISORIES` (advisory on startup replay wording corrected in Decision 8) and implementation `PASS`, accepted by the owner as satisfying the scoped review requirement; the original reports are not stored ([record](../reviews/slice-0b-1-independent-review-record.md)). **Requirements wording:** NFR-08 (and the LM-08 sentence) was revised by this work and is still marked Draft/"proposal pending re-review" in the requirements baseline. The owner's ratification above covers this ADR and O1–O6; it did not separately confirm the NFR-08 requirement wording, so that status is **unchanged** and remains an open owner item. The ADR's decisions do not depend on any wording beyond what NFR-08 already states.
 
 ## Affected documents
 

@@ -1,5 +1,7 @@
 # LD-04 design — Codex lightweight review handoff (revision 3)
 
+**Historical handoff — superseded 2026-10-12.** The design review it requested returned `PASS_WITH_ADVISORIES` for revision 3.1 (advisories corrected); ADR-0013/0014 are Accepted for Slice 0B-1 scope. The accepted outcome is in the [acceptance handoff](slice-0b-1-acceptance-handoff.md) and the [independent review record](slice-0b-1-independent-review-record.md); the text below is kept unchanged as the handoff as prepared.
+
 **Status:** Prepared 2026-10-11 for selective independent **static** review. Revision 2 was returned BLOCKED (F4, F6, F7 resolved; five corrections open). **No independent review of revision 3 has been performed**; the author's checks are not acceptance. Read-only: do not run tests, do not edit files. Report findings with severity, section and a concrete failure scenario.
 
 **Revision 3.1 and the 0B-1 implementation.** A later task removed B6, made single-process ownership concrete, withdrew adapter-declared legacy settlement and implemented 0B-1 against a scripted in-process runtime. Review that work with [slice-0b-1-code-review-handoff.md](slice-0b-1-code-review-handoff.md); the hashes below were last recomputed after those edits.

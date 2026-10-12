@@ -1,7 +1,7 @@
 # ADR-0013 — Execution attempt lifecycle, release evidence, slot ownership, invocation handoff and publication fencing
 
-**Status: Proposed (revision 3.1).** Revision 1 was recorded as "Accepted for Slice 0B planning" on author review only; an independent review returned **BLOCKED** (seven findings). Revision 2 was again returned **BLOCKED**: its F4 (runtime control), F6 (provenance) and F7 (publication recovery) were found resolved, and five corrections remained (identity mismatch, invocation versus closure, multiple legacy unresolved executions, legacy configuration baseline, the T7 predicate). Revision 3 makes those corrections. The status stays **Proposed** until the revised design receives independent review and the owner confirms; Claude's own checks are not independent acceptance. Resolves, on paper only, the *design* part of LD-04 / review finding R6; runtime-specific mechanisms remain gated by runtime evidence.
-**Date:** 2026-10-11 (revision 3).
+**Status: Accepted (revision 3.1), for Slice 0B-1 scope only — 2026-10-12.** Accepted by the owner after (a) an independent review of revision 3.1 that returned `PASS_WITH_ADVISORIES` with no blocking finding (both advisories corrected in documentation; see the [review record](../reviews/slice-0b-1-independent-review-record.md)), (b) an independent static review of the implementation that returned `PASS` on the final diff, and (c) engineering verification on the macOS development host. Earlier history: revision 1 was recorded as "Accepted for Slice 0B planning" on author review only and was returned **BLOCKED** (seven findings); revision 2 was again **BLOCKED** (five corrections); revisions 3 and 3.1 made those corrections. **Acceptance covers the decisions and the 0B-1 behavior against a scripted, in-process runtime. It does not accept any external-runtime mechanism:** every runtime-specific mechanism remains gated by runtime evidence (0B-2), and U-1, U-2 and U-3 below remain contained, not eliminated. Resolves the *design* part of LD-04 / review finding R6.
+**Date:** 2026-10-11 (revision 3); revision 3.1 accepted 2026-10-12.
 
 ## Context
 
@@ -15,7 +15,7 @@ CB-05; LM-06; LM-07; V0-D04 (retry only after settled failure, no automatic retr
 
 ## Implementation status (Slice 0B-1)
 
-Implemented for 0B-1 against a **scripted, in-process runtime only** (see the [implementation record](../implementation/slice-0b-1.md)): arbiter predicates and triggers, handoff gate and marker, slot ownership by run, quarantine, closure/stop/verification, T7 reconciliation, legacy blockers, explicit retry, shutdown and ownership. The ADR **stays Proposed**: no external runtime evidence exists, and the implementation has not had independent review.
+Implemented for 0B-1 against a **scripted, in-process runtime only** (see the [implementation record](../implementation/slice-0b-1.md) and [remediation record](../implementation/slice-0b-1-remediation.md)): arbiter predicates and triggers, handoff gate and marker, slot ownership by run, quarantine, closure/stop/verification, T7 reconciliation, legacy blockers, explicit retry, shutdown and ownership. The implementation had three independent static reviews (two returned required fixes, all seven findings remediated; the final diff returned `PASS`) and passed development-host verification on macOS (302 server tests, client suite, lint, strict types). It remains **unverified on any external runtime, on Windows, and on iPhone/Safari**; no external runtime evidence exists.
 
 ## Alternatives considered
 
@@ -41,9 +41,9 @@ Made before implementing 0B-1 against a controlled, scripted, in-process runtime
 - **`isolation_verified` (B6) and scope-wide/snapshot absence are removed** as release evidence. Five bases remain (B1–B5).
 - **Single-process ownership is enforced:** canonical, validated dataset identity; the guard is held until every supervised worker has terminated or the process dies; a hung shutdown never releases it; no second process can reconcile while an old worker could resume. For a binding recorded with `lifetime_scope = owning_process`, a later boot's exclusive guard is positive evidence (B4) that the previous worker threads are gone.
 - **Legacy settlement through an adapter's declared lifetime is withdrawn.** Legacy unresolved runs stay quarantined unless valid evidence resolves them; none exists in 0B-1. 0B-1 execution tests use a separate clean development database.
-- F1, F4, F5, F6, F7 and T7 rules are unchanged. The ADR stays **Proposed** until implementation results and a final review justify acceptance.
+- F1, F4, F5, F6, F7 and T7 rules are unchanged. The condition that implementation results and a final review justify acceptance has been met for 0B-1 scope (see Acceptance record).
 
-## Decision (revised proposal, revision 3)
+## Decision (revision 3, with the 3.1 corrections above)
 
 1. **Statuses, fence and handoff marker.** Keep five stored statuses. Add a durable, irreversible **closure fence** and a durable **handoff marker** (`NONE → STARTED`, once) with a recorded outcome (`NOT_CALLED`, `NOT_STARTED`, `ACCEPTED`, `UNKNOWN`) on `in_flight` runs. Publication requires `in_flight`, an open fence and `STARTED`. Every non-success exit passes through the fence, in a separate write or in the same write as settlement.
 2. **Two ordering problems.** *A. Publication versus closure* is decided by the **arbiter**: conditional writes on the same run record, each with **its own source predicate** (T3, T3b, T3c, T4, T5c, T5, T6, T7 — T7's source is `indeterminate`, not `in_flight`), atomic and serial per run, with a `state_version` guarding actors that act on state they did not write. First commit wins; stop is sent only after closure is durable. *B. External invocation handoff versus closure* is decided by an application-owned **handoff gate** (per-run, in-process mutual exclusion) held by the invoker from before T3b until the start acknowledgment is recorded, and required by every in-process closer. `generate` is split into `start` (bounded, returns `ACCEPTED`/`NOT_STARTED`/`UNKNOWN`) and `await_result`; the invocation right is single-use. Consequence (proved by case analysis and checked by exhaustive interleaving): no call to `start` is initiated after a closure commits. If publication wins, message and `succeeded` commit together and nothing may undo them; if closure wins, publication is prohibited, late output is provisional and discarded, and the attempt is never invoked again. No database transaction is held during `start`, `await_result`, `stop` or `probe`; no atomicity with external side effects is claimed. The existing trigger is a backstop that must be extended to require an open fence, `STARTED` and a non-legacy run.
@@ -66,6 +66,13 @@ Made before implementing 0B-1 against a controlled, scripted, in-process runtime
 - New immutable facts and conditional writes are needed (fence, slot, binding, retry intents); migrations must not backfill unknown values.
 - Windows behavior of process identity and exit verification is unmeasured (`BLOCKED_BY_RUNTIME_EVIDENCE` / `REQUIRED_BEFORE_FULL_V0`).
 - Submission fencing stays a documented limitation for 0B and is required before full V0 unless the owner accepts it.
+
+## Acceptance record (2026-10-12)
+
+- **Owner ratification (2026-10-12), as stated by the owner:** **O1** unverifiable runtime termination quarantines the execution slot, with no force release without admissible evidence; **O4** closure may discard completed but unpublished output, explicit retry is required, and success already durably published is preserved; **O5** unresolved legacy execution states block unsafe dispatch until admissible reconciliation; **O6** the additional durable write of the lifecycle is acceptable. **O3** (refuse inadmissible sends before saving the user message; preserve unsent client drafts on definite refusal) is recorded with [ADR-0014](0014-execution-configuration-provenance-and-continuity.md), together with O2.
+- **Independent review:** design revision 3.1 `PASS_WITH_ADVISORIES` and implementation `PASS`, accepted by the owner as satisfying the scoped independent-review requirement. The original reports are not stored; the [review record](../reviews/slice-0b-1-independent-review-record.md) states what was relayed and what is unavailable.
+- **Not accepted by this ADR:** any external-runtime mechanism (control during generation, instance/process identity and exit verification, `late_delivery_excluded`, bounded `start`); B3–B5 evidence from any real producer; a legacy-capable evidence producer; Windows behavior; the ADR-0011 exclusive-instance mechanism behind assumption A-1; submission fencing; authentication and access containment. A force release or any weakening of CB-05 still requires its own ADR.
+- Related follow-up (not a condition of this acceptance): dedicated client presentation and tests for the new refusal codes.
 
 ## Matters requiring later runtime evidence
 

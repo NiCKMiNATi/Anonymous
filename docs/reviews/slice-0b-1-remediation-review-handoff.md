@@ -1,5 +1,7 @@
 # Slice 0B-1 remediation — Codex static diff-review handoff
 
+**Historical handoff — superseded 2026-10-12.** Both review passes were performed (`PASS_WITH_REQUIRED_FIXES`, then `PASS` on the final diff); ADR-0013/0014 are no longer Proposed. The accepted outcome is in the [acceptance handoff](slice-0b-1-acceptance-handoff.md) and the [independent review record](slice-0b-1-independent-review-record.md); the text below is kept unchanged as the handoff as prepared.
+
 **Status:** prepared 2026-10-11. **No independent review of this diff has been performed.** Static review only (do not run tests or edit files). Review **only** `git diff ecef413..HEAD` (the commit that contains this file; nothing is pushed) and the four original findings. Report findings with severity, file:line and a concrete failure scenario. Record: [slice-0b-1-remediation.md](../implementation/slice-0b-1-remediation.md).
 
 ## Original findings and where they were fixed

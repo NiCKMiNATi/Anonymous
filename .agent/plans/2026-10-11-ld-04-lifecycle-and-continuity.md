@@ -2,7 +2,7 @@
 
 ## 1. Title, status, and purpose
 
-**Status:** Active — design remediation complete as a **proposal**; awaiting independent re-review of revision 3 and owner confirmation. Base `01e9f46`. Revision 1 was returned **BLOCKED** (F1–F7). Revision 2 remediated them and was again returned **BLOCKED**: F4 (runtime control), F6 (provenance) and F7 (publication recovery) resolved; five corrections remained (identity mismatch, invocation versus closure, multiple legacy unresolved executions, legacy configuration baseline, T7 predicate). Revision 3 makes those five corrections without reopening F4/F6/F7. No application code, schema, migration, test, dependency or runtime was touched; the only new artifacts are documents (design, ADRs, an evidence record and its fixture file).
+**Status:** Design work **complete and accepted for Slice 0B-1 scope (2026-10-12)**: ADR-0013 and ADR-0014 Accepted, LD-04 design revision 3.1 accepted, O1–O6 ratified. Remaining open items: NFR-08/LM-08 requirement wording confirmation, and everything gated by runtime evidence (0B-2). History: Revision 1 was returned **BLOCKED** (F1–F7); revision 2 was returned **BLOCKED** (five corrections); revisions 3 and 3.1 made them; revision 3.1 then passed independent review with advisories.
 
 Purpose: define, safely enough that Slice 0B-1 can be implemented against a scripted port, how an execution attempt is owned, closed, published, released, recovered, retried and attributed, and how a conversation keeps its selected configuration across upgrades. Outcome: [LD-04 design](../../docs/design/ld-04-execution-lifecycle.md), [ADR-0013](../../docs/adr/0013-execution-attempt-lifecycle-and-release-evidence.md), [ADR-0014](../../docs/adr/0014-execution-configuration-provenance-and-continuity.md), revised NFR-08/LM-08 wording, and the review handoff.
 
@@ -52,9 +52,11 @@ Documentation only: link check; ID/section reference check (requirement IDs, ADR
 - [x] 2026-10-11 Self-check (§11).
 - [x] 2026-10-11 Independent re-review of revision 2: **BLOCKED** (F4/F6/F7 resolved; five corrections).
 - [x] 2026-10-11 Revision 3: five corrections; golden baseline captured and recorded; ADRs kept Proposed; protocol and predicate checks run.
-- [ ] Independent re-review of revision 3 (handoff: `docs/reviews/ld-04-lightweight-review-handoff.md`). **Not performed.**
-- [ ] Owner confirmation of O1–O6 and ADR-0013/0014, NFR-08 wording.
-- [ ] Slice 0B-1 implementation task (not started; separate authorization).
+- [x] 2026-10-11 Revision 3.1 (B6 removed, concrete ownership, legacy settlement via declared lifetime withdrawn).
+- [x] 2026-10-12 Independent review of revision 3.1: `PASS_WITH_ADVISORIES`, advisories corrected (`4d99a86`); relayed, original not stored ([record](../../docs/reviews/slice-0b-1-independent-review-record.md)).
+- [x] 2026-10-12 Owner ratified O1–O6; ADR-0013/0014 Accepted for Slice 0B-1 scope; design status and verdict updated.
+- [ ] **Open:** owner confirmation of the NFR-08/LM-08 *requirement wording* (still Draft in `docs/02-requirements.md` and `docs/05-data-model.md`); it was not separately ratified.
+- [x] Slice 0B-1 implemented and closed on the development host (see [its ExecPlan](2026-10-11-slice-0b1-supervised-execution.md)).
 
 ## 9. Discoveries
 

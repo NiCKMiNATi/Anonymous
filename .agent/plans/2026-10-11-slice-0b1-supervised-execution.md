@@ -2,7 +2,7 @@
 
 ## 1. Title, status, and purpose
 
-**Status:** Complete for scope (implementation and local validation); awaiting independent code review. Implements the corrected LD-04 contract (design revision 3.1, ADR-0013/0014 **Proposed**) with a deterministic, scripted, in-process runtime and no external broker, launcher or surviving process. Outcome: a lifecycle that cannot publish after closure, cannot invoke after a winning closure, releases the single execution slot only on admissible evidence, preserves legacy executions untouched, supports explicit retry on the same user message, and keeps each conversation's configuration pinned.
+**Status:** **CLOSED on the macOS development host (2026-10-12), for scope.** Implemented, independently reviewed (final diff `PASS`), verified, and owner-ratified (O1–O6); ADR-0013/0014 Accepted for 0B-1 scope. Scripted/in-process runtime only; nothing here is accepted for any external runtime, Windows, iPhone/Safari, authentication or access containment (see §11). Implements the corrected LD-04 contract (design revision 3.1) with a deterministic, scripted, in-process runtime and no external broker, launcher or surviving process. Outcome: a lifecycle that cannot publish after closure, cannot invoke after a winning closure, releases the single execution slot only on admissible evidence, preserves legacy executions untouched, supports explicit retry on the same user message, and keeps each conversation's configuration pinned.
 
 ## 2. Repository context
 
@@ -43,8 +43,10 @@ Behavior tests tied to acceptance criteria with relevant failure, preservation a
 - [x] 2026-10-11 Remediation of the four findings ([record](../../docs/implementation/slice-0b-1-remediation.md)): reservation-based thread registry, admission gate, COMMIT-boundary fault tests (27), settlement retry on unknown outcome, per-run reconcile containment, event-based test synchronization. 296 server tests; client 53 + review suite 7; lint/format/strict types/tsc/build clean. Committed locally; not pushed.
 - [x] Codex review of the remediation diff: `PASS_WITH_REQUIRED_FIXES`, three findings (watchdog reservation leak; AFTER_COMMIT assertions; SIGKILL synchronization). Fixed ([record §8](../../docs/implementation/slice-0b-1-remediation.md)); 302 server tests.
 - [x] 2026-10-12 Final Codex check of `bdd1afa..b33d88e`: `PASS`, no findings. Development-host verification re-run (302 server, 53 + 7 client, lint/strict types/tsc/build clean, loopback smoke): [acceptance handoff](../../docs/reviews/slice-0b-1-acceptance-handoff.md). Status `READY_FOR_OWNER_ACCEPTANCE`, not closed.
-- [ ] Owner confirmation of O1–O6; ADR-0013/0014 acceptance (they stay Proposed).
-- [ ] 0B-2 (not started; needs runtime evidence and the owner's model-download authorization).
+- [x] 2026-10-12 Design review of ADR-0013/0014 revision 3.1: `PASS_WITH_ADVISORIES`; both advisories corrected in documentation (`4d99a86`). Relayed, original not stored: [review record](../../docs/reviews/slice-0b-1-independent-review-record.md).
+- [x] 2026-10-12 Owner ratified O1–O6 and accepted the two independent reviews as satisfying the scoped review requirement; ADR-0013 and ADR-0014 set to Accepted for 0B-1 scope; LD-04 design status and verdict updated; Slice 0B-1 **closed** on the macOS development host ([acceptance handoff](../../docs/reviews/slice-0b-1-acceptance-handoff.md)).
+- [ ] Open, not part of 0B-1 closure: owner confirmation of the NFR-08/LM-08 requirement wording (still Draft); dedicated client presentation and tests for the new refusal codes; confirm push state (the remote `main` was `b33d88e` on 2026-10-12; later local commits are unpushed).
+- [ ] 0B-2 (not started; plan only: [2026-10-12-slice-0b2-runtime-evidence.md](2026-10-12-slice-0b2-runtime-evidence.md); needs the owner's separate model-download authorization and size cap before any download).
 
 ## 9. Discoveries
 
@@ -59,8 +61,10 @@ Behavior tests tied to acceptance criteria with relevant failure, preservation a
 
 ## 10. Decision log
 
-All design decisions remain **proposed** in ADR-0013/0014 and the design; implementation choices: poll-based slot waiting; one shipped configuration; startup self-test covers FX-01…FX-06 and tests cover FX-07; retry route and health `generation` block added, adoption/reconcile routes not; default dataset file renamed to `anonymous-0b1-dev.sqlite3` so execution never runs against a legacy database.
+Design decisions were accepted by the owner on 2026-10-12 in ADR-0013/0014 (for 0B-1 scope; O1–O6 ratified, see the ADRs and design §14). Implementation choices: poll-based slot waiting; one shipped configuration; startup self-test covers FX-01…FX-06 and tests cover FX-07; retry route and health `generation` block added, adoption/reconcile routes not; default dataset file renamed to `anonymous-0b1-dev.sqlite3` so execution never runs against a legacy database.
 
 ## 11. Final outcome
 
-Implemented as scoped. Validation actually run: lint, format check, strict mypy, 249 tests, 15 repeated concurrency/process runs. Not run: client tests, Windows, any external runtime. Deviations from the design are listed in design §17. Remaining limitations and 0B-2 prerequisites: [implementation record](../../docs/implementation/slice-0b-1.md).
+Implemented as scoped and **closed on the macOS development host on 2026-10-12.** Validation actually run (final tree `b33d88e`, 2026-10-12): server 302 passed; ruff and format clean; strict mypy clean (79 files); client 53 + review suite 7 passed; `tsc` and build clean; 180-test concurrency/reservation/recovery subset repeated 8 times with no failure; race-repro script behaves as designed; real-process loopback smoke (send, replay, failure, retry with one user message, clean SIGTERM) with synthetic data. Independent review: three static reviews (seven findings remediated; final diff `PASS`) and a design review `PASS_WITH_ADVISORIES` (relayed; originals not stored).
+
+**Not accepted and not claimed:** any external runtime or real model; Windows; iPhone/Safari; production authentication or access containment; the ADR-0011 exclusive-instance mechanism (the development `InstanceGuard` is not it); U-1/U-2/U-3 (contained, not eliminated); submission fencing; use of real private data or any exposure beyond loopback. Deviations from the design are listed in design §17. Known limitations: [implementation record](../../docs/implementation/slice-0b-1.md) and [remediation record](../../docs/implementation/slice-0b-1-remediation.md). Follow-up: dedicated refusal-code UI and client tests; NFR-08/LM-08 wording confirmation; 0B-2 runtime evidence.
