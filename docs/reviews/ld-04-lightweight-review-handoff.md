@@ -26,14 +26,14 @@
 
 1. `start` is called only by the holder of the single-use invocation right, only after T3b is durable, only under G, at most once ever; a closure of an open fence commits only under G; T3b requires an open fence. ⇒ no `start` initiated after a closure commits.
 2. Every transition is one conditional write on its own source predicate (§4.1 table); T7 has source `indeterminate`; repeated T7 returns `SETTLED`.
-3. B1 only when durable `handoff = NONE`/`NOT_CALLED`; after an `UNKNOWN`/unrecorded handoff only B3/B4/B6 (B5 only with declared `late_delivery_excluded`); no basis ⇒ quarantine.
+3. B1 only when durable `handoff = NONE`/`NOT_CALLED`; after an `UNKNOWN`/unrecorded handoff only B3/B4 (B5 only with declared `late_delivery_excluded`; B6 was removed in revision 3.1); no basis ⇒ quarantine.
 4. Legacy rows are never modified by migration; `LB` blocks all dispatch; no slot record is created for them.
 5. No database transaction is held during `start`, `await_result`, `stop` or `probe`; no atomicity with external effects is claimed.
 
 ## Specific remaining risks
 
 - **U-1** delayed delivery after an `UNKNOWN` handoff is contained, not prevented. **U-2** a hung handoff leaves the run open until restart. **U-3** relies on A-1 (single process) backed only by the development `InstanceGuard`.
-- No real producer exists for B3–B6 or for legacy evidence; existing 0A datasets with unresolved runs stay dispatch-blocked (O5). Owner-facing O1–O6 are unconfirmed.
+- No real producer exists for B3–B5 (B6 removed) or for legacy evidence; existing 0A datasets with unresolved runs stay dispatch-blocked (O5). Owner-facing O1–O6 are unconfirmed.
 - The fixtures pin the constructed view only. The protocol model check and predicate check were author scratch scripts (not committed) and cover only the in-process protocol.
 
 ## Claims Codex must challenge

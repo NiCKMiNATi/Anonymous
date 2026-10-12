@@ -42,7 +42,7 @@ Each fixture records the history, the request actually **received by the model p
 
 1. The 0B-1 test suite loads this fixture file (its sha256 pinned in the test and in the manifest of the baseline configuration `E0`), expands the `@rule:` marker, and replays each fixture history through the **0B-1** store and `E0` context builder.
 2. For every fixture it compares, byte-for-byte on the canonical serialization, the constructed view with the recorded `view` (and `view_sha256`). Any difference fails the build.
-3. The comparison runs (a) as a build/test gate and (b) as a cheap startup self-test of the shipped `E0` builder; failing (b) marks `E0` unavailable (design §11.4).
+3. The comparison runs (a) as a build/test gate and (b) as a cheap startup self-test of the shipped `E0` builder (digest check plus FX-01–FX-06; FX-07 is verified by the test suite only); failing (b) marks `E0` unavailable (design §11.4).
 4. An independent reviewer can recompute steps 1–4 of the capture procedure from `01e9f46` without trusting the 0B-1 code.
 
 ## Limits

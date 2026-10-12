@@ -64,20 +64,29 @@ Two scripting slips occurred while smoke testing (a zsh glob error that prevente
 - **Accepted:** Slice 0A (development host). **Nothing in 0B-1 is formally accepted.**
 - **Deferred or unverified:** any external runtime (llama.cpp), 0B-2, Windows, iPhone/Safari, SQLite on Windows, the ADR-0011 exclusive-instance mechanism (the development guard is not it), authentication, LAN or public exposure, and production security. Reported counts of mutation checks and earlier repeat runs are from earlier records, not re-run here.
 
-## 7. Owner decisions O1-O6 (recommendations; none formally approved)
+## 7. Owner decisions O1-O6 (recommendations; **all six PENDING owner ratification**)
 
-| | Question | Recommendation |
-| --- | --- | --- |
-| O1 | Unverifiable termination quarantines the single slot; no force release | Accept for 0B-1. Make "can Anonymous own the runtime process" an explicit question of the 0B-2 evidence task rather than weakening CB-05. |
-| O2 | Bind legacy conversations at startup only after the baseline reproduces the real 0A golden fixtures | Accept; the golden fixtures are tested through the real store. Explicit adoption remains the fallback if equivalence is ever lost. |
-| O3 | Refuse before saving while quarantined or the configuration is unavailable | Accept, and keep the draft-restoring client behavior (section 4). |
-| O4 | Closure discards a completed but unpublished result; the user retries | Accept. |
-| O5 | Existing 0A datasets with unresolved runs cannot dispatch; no force release or attestation | Accept; use the fresh `anonymous-0b1-dev.sqlite3`. Any special treatment is a CB-05 weakening needing its own ADR. |
-| O6 | One extra durable write (T3b) and one best-effort write (T3c) per dispatch | Accept; the cost is small and carries the safety property. |
+Nothing below is owner approval. A decision is ratified only when the owner states it explicitly (a decision, not silence or a prior task instruction), at which point it is recorded with its date in the ADR/design it affects and in the table's last column. The two review advisories (stale B6 text; startup replay wording) were corrected in documentation only and change no decision below.
+
+| | Question | Recommendation | Ratification |
+| --- | --- | --- | --- |
+| O1 | Unverifiable termination quarantines the single slot; no force release | Accept for 0B-1. Make "can Anonymous own the runtime process" an explicit question of the 0B-2 evidence task rather than weakening CB-05. | PENDING |
+| O2 | Bind legacy conversations at startup only after the baseline reproduces the real 0A golden fixtures | Accept. Startup binding checks the fixture digest and replays FX-01–FX-06; FX-07 is verified by the test suite only. Explicit adoption remains the way to change a configuration, and the requirement if equivalence cannot be shown. | PENDING |
+| O3 | Refuse before saving while quarantined or the configuration is unavailable | Accept, and keep the draft-restoring client behavior (section 4). | PENDING |
+| O4 | Closure discards a completed but unpublished result; the user retries | Accept. | PENDING |
+| O5 | Existing 0A datasets with unresolved runs cannot dispatch; no force release or attestation | Accept; use the fresh `anonymous-0b1-dev.sqlite3`. Any special treatment is a CB-05 weakening needing its own ADR. | PENDING |
+| O6 | One extra durable write (T3b) and one best-effort write (T3c) per dispatch | Accept; the cost is small and carries the safety property. | PENDING |
 
 ## 8. ADR-0013 / ADR-0014
 
-Both stay **Proposed**. Engineering readiness: the implementation exists, was statically reviewed three times, and passes its tests. They are not ready to flip on this evidence alone because their own text requires (a) independent review of the revised design and (b) owner confirmation. The repository does not record an independent review of design revision 3.1 as such (only of the implementation and its remediations), so the owner should say whether those code reviews are considered sufficient or a design re-review is wanted.
+Both stay **Proposed**. Their own text requires (a) independent review of the revised design and (b) owner confirmation.
+
+- **(a) Design review: satisfied, as reported.** The independent review of revision 3.1 returned `PASS_WITH_ADVISORIES` with no blocking finding; the review report itself is not stored in the repository, so this rests on the report relayed to this task. The implementation was also reviewed (`PASS` on the final diff). The two advisories were corrected in documentation only: ADR-0013's scripted-adapter evidence range is now B3–B5 and the lightweight handoff no longer permits B6 (B6 stays removed); ADR-0014 Decision 8 and design §§11.3–11.4 now say startup replays FX-01–FX-06 and checks the fixture digest, while FX-07 is verified in the test suite through the real store.
+- **(b) Owner confirmation: not given.** O1–O6 are pending. The ADRs' "Implementation status" paragraphs also still say the implementation has not had independent review, which is now outdated; update them in the same change that records ratification, not before.
+
+**O2 clarification.** Startup binding and explicit adoption cover different circumstances and do not conflict. Startup binding applies only to a pre-0B conversation that has no binding, only after the fixture digest and FX-01–FX-06 replay pass, and records `legacy_baseline` with its evidence; it never touches an already-bound conversation (`bind_legacy_conversations` selects only legacy conversations with no binding). Explicit adoption is the only route in every other case: changing a configuration, or establishing one when equivalence cannot be shown (the conversation is then refused with `configuration_unbound_legacy`). If the baseline later fails the self-test after binding, the binding stands, the configuration becomes unavailable (`configuration_unavailable`), and adoption is again required. The code and both documents agree; no implementation change is needed. The only policy question left is the owner's: may startup attribute unbound legacy conversations to the verified baseline without a per-conversation owner action (as proposed), or must adoption always come first?
+
+**Remaining owner-acceptance gates:** (1) ratify O1–O6 explicitly; (2) confirm that the relayed `PASS_WITH_ADVISORIES` design review suffices as the independent review (ideally store its report); (3) then update ADR-0013/0014 status and implementation-status text, the design's §14 and verdict, and the ExecPlan; (4) confirm the push state; (5) only then mark Slice 0B-1 closed. Until then the status stays `READY_FOR_OWNER_ACCEPTANCE`.
 
 ## 9. Recommendation for the next milestone
 

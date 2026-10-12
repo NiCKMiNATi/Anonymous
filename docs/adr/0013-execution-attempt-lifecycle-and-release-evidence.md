@@ -69,7 +69,7 @@ Made before implementing 0B-1 against a controlled, scripted, in-process runtime
 
 ## Matters requiring later runtime evidence
 
-Whether a runtime serves `stop`/`probe` during generation; per-attempt registration guarantees; whether `start` can be bounded and can abandon sends, and whether late delivery after an `UNKNOWN` handoff can be excluded; instance and process identity and exit verification (Mac and Windows); reliable idle or per-attempt status; requester-disconnect behavior; `finish_reason`, faithful input and version/artifact-digest reporting; the existence of any legacy-capable evidence producer. Until measured, only scripted adapters may claim bases B3–B6.
+Whether a runtime serves `stop`/`probe` during generation; per-attempt registration guarantees; whether `start` can be bounded and can abandon sends, and whether late delivery after an `UNKNOWN` handoff can be excluded; instance and process identity and exit verification (Mac and Windows); reliable idle or per-attempt status; requester-disconnect behavior; `finish_reason`, faithful input and version/artifact-digest reporting; the existence of any legacy-capable evidence producer. Until measured, only scripted adapters may claim bases B3–B5 (B6 was removed in revision 3.1 and is not an admissible basis).
 
 ## Affected documents
 
