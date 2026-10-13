@@ -1,0 +1,540 @@
+{
+ "host": {
+  "os": "macOS-27.0.1-arm64-arm-64bit",
+  "python": "3.9.6",
+  "machine": "arm64",
+  "kern_maxprocperuid": 2666
+ },
+ "marker": "e1-5b43fb4229",
+ "variants": {
+  "S1/direct": {
+   "trials": 20,
+   "ok": 20,
+   "errors": 0,
+   "leaks": 0,
+   "unsound_v1": 0,
+   "unsound_v2": 0,
+   "verdicts_v1": {},
+   "verdicts_v2": {},
+   "failed_checks": {}
+  },
+  "S1/with-grandchild": {
+   "trials": 20,
+   "ok": 20,
+   "errors": 0,
+   "leaks": 0,
+   "unsound_v1": 0,
+   "unsound_v2": 0,
+   "verdicts_v1": {},
+   "verdicts_v2": {},
+   "failed_checks": {}
+  },
+  "S1/wrapper-sh": {
+   "trials": 10,
+   "ok": 10,
+   "errors": 0,
+   "leaks": 0,
+   "unsound_v1": 0,
+   "unsound_v2": 0,
+   "verdicts_v1": {},
+   "verdicts_v2": {},
+   "failed_checks": {}
+  },
+  "S2/plain": {
+   "trials": 20,
+   "ok": 20,
+   "errors": 0,
+   "leaks": 0,
+   "unsound_v1": 0,
+   "unsound_v2": 0,
+   "verdicts_v1": {
+    "PROVEN_TERMINATED": 20
+   },
+   "verdicts_v2": {
+    "PROVEN_TERMINATED": 20
+   },
+   "failed_checks": {}
+  },
+  "S2/with-grandchild": {
+   "trials": 20,
+   "ok": 20,
+   "errors": 0,
+   "leaks": 0,
+   "unsound_v1": 0,
+   "unsound_v2": 0,
+   "verdicts_v1": {
+    "PROVEN_TERMINATED": 20
+   },
+   "verdicts_v2": {
+    "PROVEN_TERMINATED": 20
+   },
+   "failed_checks": {}
+  },
+  "S3/gc-escaped": {
+   "trials": 20,
+   "ok": 20,
+   "errors": 0,
+   "leaks": 0,
+   "unsound_v1": 0,
+   "unsound_v2": 0,
+   "verdicts_v1": {},
+   "verdicts_v2": {},
+   "failed_checks": {}
+  },
+  "S3/gc-inherit-listener": {
+   "trials": 20,
+   "ok": 20,
+   "errors": 0,
+   "leaks": 0,
+   "unsound_v1": 0,
+   "unsound_v2": 0,
+   "verdicts_v1": {},
+   "verdicts_v2": {},
+   "failed_checks": {}
+  },
+  "S3/gc-same-group-kill": {
+   "trials": 20,
+   "ok": 20,
+   "errors": 0,
+   "leaks": 0,
+   "unsound_v1": 0,
+   "unsound_v2": 0,
+   "verdicts_v1": {},
+   "verdicts_v2": {},
+   "failed_checks": {}
+  },
+  "S3/gc-same-pid-kill": {
+   "trials": 20,
+   "ok": 20,
+   "errors": 0,
+   "leaks": 0,
+   "unsound_v1": 0,
+   "unsound_v2": 0,
+   "verdicts_v1": {},
+   "verdicts_v2": {},
+   "failed_checks": {}
+  },
+  "S3/plain": {
+   "trials": 20,
+   "ok": 20,
+   "errors": 0,
+   "leaks": 0,
+   "unsound_v1": 0,
+   "unsound_v2": 0,
+   "verdicts_v1": {},
+   "verdicts_v2": {},
+   "failed_checks": {}
+  },
+  "S4/own-session": {
+   "trials": 20,
+   "ok": 20,
+   "errors": 0,
+   "leaks": 0,
+   "unsound_v1": 0,
+   "unsound_v2": 0,
+   "verdicts_v1": {
+    "PROVEN_ALIVE": 20
+   },
+   "verdicts_v2": {
+    "PROVEN_ALIVE": 20
+   },
+   "failed_checks": {}
+  },
+  "S4/owner-group": {
+   "trials": 20,
+   "ok": 20,
+   "errors": 0,
+   "leaks": 0,
+   "unsound_v1": 0,
+   "unsound_v2": 0,
+   "verdicts_v1": {
+    "PROVEN_ALIVE": 20
+   },
+   "verdicts_v2": {
+    "PROVEN_ALIVE": 20
+   },
+   "failed_checks": {}
+  },
+  "S4/watchdog-ignores-sigterm": {
+   "trials": 20,
+   "ok": 20,
+   "errors": 0,
+   "leaks": 0,
+   "unsound_v1": 0,
+   "unsound_v2": 0,
+   "verdicts_v1": {
+    "PROVEN_TERMINATED": 20
+   },
+   "verdicts_v2": {
+    "PROVEN_TERMINATED": 20
+   },
+   "failed_checks": {}
+  },
+  "S4/watchdog-pipe": {
+   "trials": 20,
+   "ok": 20,
+   "errors": 0,
+   "leaks": 0,
+   "unsound_v1": 0,
+   "unsound_v2": 0,
+   "verdicts_v1": {
+    "PROVEN_TERMINATED": 20
+   },
+   "verdicts_v2": {
+    "PROVEN_TERMINATED": 20
+   },
+   "failed_checks": {}
+  },
+  "S5/alive-after-owner-death": {
+   "trials": 20,
+   "ok": 20,
+   "errors": 0,
+   "leaks": 0,
+   "unsound_v1": 0,
+   "unsound_v2": 0,
+   "verdicts_v1": {
+    "PROVEN_ALIVE": 20
+   },
+   "verdicts_v2": {
+    "PROVEN_ALIVE": 20
+   },
+   "failed_checks": {}
+  },
+  "S5/dead-graceful": {
+   "trials": 20,
+   "ok": 20,
+   "errors": 0,
+   "leaks": 0,
+   "unsound_v1": 0,
+   "unsound_v2": 0,
+   "verdicts_v1": {
+    "PROVEN_TERMINATED": 20
+   },
+   "verdicts_v2": {
+    "PROVEN_TERMINATED": 20
+   },
+   "failed_checks": {}
+  },
+  "S5/dead-killed-after-owner-death": {
+   "trials": 20,
+   "ok": 20,
+   "errors": 0,
+   "leaks": 0,
+   "unsound_v1": 0,
+   "unsound_v2": 0,
+   "verdicts_v1": {
+    "PROVEN_TERMINATED": 20
+   },
+   "verdicts_v2": {
+    "PROVEN_TERMINATED": 20
+   },
+   "failed_checks": {}
+  },
+  "S5/late-grandchild-escaped-tag-inherited": {
+   "trials": 20,
+   "ok": 20,
+   "errors": 0,
+   "leaks": 0,
+   "unsound_v1": 20,
+   "unsound_v2": 0,
+   "verdicts_v1": {
+    "PROVEN_TERMINATED": 20
+   },
+   "verdicts_v2": {
+    "PROVEN_ALIVE": 20
+   },
+   "failed_checks": {}
+  },
+  "S5/late-grandchild-escaped-tag-scrubbed": {
+   "trials": 20,
+   "ok": 20,
+   "errors": 0,
+   "leaks": 0,
+   "unsound_v1": 20,
+   "unsound_v2": 20,
+   "verdicts_v1": {
+    "PROVEN_TERMINATED": 20
+   },
+   "verdicts_v2": {
+    "PROVEN_TERMINATED": 20
+   },
+   "failed_checks": {}
+  },
+  "S5/late-grandchild-same-group": {
+   "trials": 20,
+   "ok": 20,
+   "errors": 0,
+   "leaks": 0,
+   "unsound_v1": 0,
+   "unsound_v2": 0,
+   "verdicts_v1": {
+    "INDETERMINATE": 20
+   },
+   "verdicts_v2": {
+    "PROVEN_ALIVE": 20
+   },
+   "failed_checks": {}
+  },
+  "S5/nonce-only-alive": {
+   "trials": 20,
+   "ok": 20,
+   "errors": 0,
+   "leaks": 0,
+   "unsound_v1": 0,
+   "unsound_v2": 0,
+   "verdicts_v1": {
+    "PROVEN_ALIVE": 20
+   },
+   "verdicts_v2": {
+    "PROVEN_ALIVE": 20
+   },
+   "failed_checks": {}
+  },
+  "S5/nonce-only-dead": {
+   "trials": 20,
+   "ok": 20,
+   "errors": 0,
+   "leaks": 0,
+   "unsound_v1": 0,
+   "unsound_v2": 0,
+   "verdicts_v1": {
+    "INDETERMINATE": 20
+   },
+   "verdicts_v2": {
+    "INDETERMINATE": 20
+   },
+   "failed_checks": {}
+  },
+  "S5/pid-reuse-real": {
+   "trials": 2,
+   "ok": 2,
+   "errors": 0,
+   "leaks": 0,
+   "unsound_v1": 0,
+   "unsound_v2": 0,
+   "verdicts_v1": {
+    "PROVEN_TERMINATED": 2
+   },
+   "verdicts_v2": {
+    "PROVEN_TERMINATED": 2
+   },
+   "failed_checks": {}
+  },
+  "S5/pid-reuse-simulated-original-alive": {
+   "trials": 20,
+   "ok": 20,
+   "errors": 0,
+   "leaks": 0,
+   "unsound_v1": 0,
+   "unsound_v2": 0,
+   "verdicts_v1": {
+    "PROVEN_ALIVE": 20
+   },
+   "verdicts_v2": {
+    "PROVEN_ALIVE": 20
+   },
+   "failed_checks": {}
+  },
+  "S5/pid-reuse-simulated-original-dead": {
+   "trials": 20,
+   "ok": 20,
+   "errors": 0,
+   "leaks": 0,
+   "unsound_v1": 0,
+   "unsound_v2": 0,
+   "verdicts_v1": {
+    "PROVEN_TERMINATED": 20
+   },
+   "verdicts_v2": {
+    "PROVEN_TERMINATED": 20
+   },
+   "failed_checks": {}
+  },
+  "S5/port-reuse-foreign-listener": {
+   "trials": 20,
+   "ok": 20,
+   "errors": 0,
+   "leaks": 0,
+   "unsound_v1": 0,
+   "unsound_v2": 0,
+   "verdicts_v1": {
+    "PROVEN_TERMINATED": 20
+   },
+   "verdicts_v2": {
+    "PROVEN_TERMINATED": 20
+   },
+   "failed_checks": {}
+  },
+  "S5/record-missing-start": {
+   "trials": 20,
+   "ok": 20,
+   "errors": 0,
+   "leaks": 0,
+   "unsound_v1": 0,
+   "unsound_v2": 0,
+   "verdicts_v1": {
+    "INDETERMINATE": 20
+   },
+   "verdicts_v2": {
+    "INDETERMINATE": 20
+   },
+   "failed_checks": {}
+  },
+  "S5/sigstopped-alive-unresponsive": {
+   "trials": 20,
+   "ok": 20,
+   "errors": 0,
+   "leaks": 0,
+   "unsound_v1": 0,
+   "unsound_v2": 0,
+   "verdicts_v1": {
+    "PROVEN_ALIVE": 20
+   },
+   "verdicts_v2": {
+    "PROVEN_ALIVE": 20
+   },
+   "failed_checks": {}
+  },
+  "S5/wrapper-unverified-alive": {
+   "trials": 20,
+   "ok": 20,
+   "errors": 0,
+   "leaks": 0,
+   "unsound_v1": 0,
+   "unsound_v2": 0,
+   "verdicts_v1": {
+    "PROVEN_ALIVE": 20
+   },
+   "verdicts_v2": {
+    "PROVEN_ALIVE": 20
+   },
+   "failed_checks": {}
+  },
+  "S5/wrapper-unverified-dead": {
+   "trials": 20,
+   "ok": 20,
+   "errors": 0,
+   "leaks": 0,
+   "unsound_v1": 0,
+   "unsound_v2": 0,
+   "verdicts_v1": {
+    "INDETERMINATE": 20
+   },
+   "verdicts_v2": {
+    "INDETERMINATE": 20
+   },
+   "failed_checks": {}
+  },
+  "S6/foreign-listener-after-exit": {
+   "trials": 20,
+   "ok": 20,
+   "errors": 0,
+   "leaks": 0,
+   "unsound_v1": 0,
+   "unsound_v2": 0,
+   "verdicts_v1": {},
+   "verdicts_v2": {},
+   "failed_checks": {}
+  },
+  "S6/listener-persists-after-owner-process-death": {
+   "trials": 20,
+   "ok": 20,
+   "errors": 0,
+   "leaks": 0,
+   "unsound_v1": 0,
+   "unsound_v2": 0,
+   "verdicts_v1": {},
+   "verdicts_v2": {},
+   "failed_checks": {}
+  },
+  "S6/queries-under-cpu-load": {
+   "trials": 20,
+   "ok": 20,
+   "errors": 0,
+   "leaks": 0,
+   "unsound_v1": 0,
+   "unsound_v2": 0,
+   "verdicts_v1": {},
+   "verdicts_v2": {},
+   "failed_checks": {}
+  },
+  "S6/reuseport-two-listeners": {
+   "trials": 20,
+   "ok": 20,
+   "errors": 0,
+   "leaks": 0,
+   "unsound_v1": 0,
+   "unsound_v2": 0,
+   "verdicts_v1": {},
+   "verdicts_v2": {},
+   "failed_checks": {}
+  },
+  "S6/steady-state": {
+   "trials": 20,
+   "ok": 20,
+   "errors": 0,
+   "leaks": 0,
+   "unsound_v1": 0,
+   "unsound_v2": 0,
+   "verdicts_v1": {},
+   "verdicts_v2": {},
+   "failed_checks": {}
+  },
+  "S7/cpu-spin-escalation-budget": {
+   "trials": 20,
+   "ok": 20,
+   "errors": 0,
+   "leaks": 0,
+   "unsound_v1": 0,
+   "unsound_v2": 0,
+   "verdicts_v1": {},
+   "verdicts_v2": {},
+   "failed_checks": {}
+  },
+  "S7/inflight-request-graceful": {
+   "trials": 20,
+   "ok": 20,
+   "errors": 0,
+   "leaks": 0,
+   "unsound_v1": 0,
+   "unsound_v2": 0,
+   "verdicts_v1": {},
+   "verdicts_v2": {},
+   "failed_checks": {}
+  },
+  "S7/probe-bounded-when-nobody-serves": {
+   "trials": 20,
+   "ok": 20,
+   "errors": 0,
+   "leaks": 0,
+   "unsound_v1": 0,
+   "unsound_v2": 0,
+   "verdicts_v1": {},
+   "verdicts_v2": {},
+   "failed_checks": {}
+  },
+  "S7/sigstopped-sigcont-delivers-pending-sigterm": {
+   "trials": 20,
+   "ok": 20,
+   "errors": 0,
+   "leaks": 0,
+   "unsound_v1": 0,
+   "unsound_v2": 0,
+   "verdicts_v1": {},
+   "verdicts_v2": {},
+   "failed_checks": {}
+  },
+  "S7/sigstopped-sigterm-pending": {
+   "trials": 20,
+   "ok": 20,
+   "errors": 0,
+   "leaks": 0,
+   "unsound_v1": 0,
+   "unsound_v2": 0,
+   "verdicts_v1": {},
+   "verdicts_v2": {},
+   "failed_checks": {}
+  }
+ },
+ "final_audit_processes_with_marker": []
+}

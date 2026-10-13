@@ -81,7 +81,7 @@ Per acceptance criterion: each verdict cites trial counts and raw-artifact hashe
 - [x] 2026-10-12 E1 executed: 772 trials, 0 failed checks, clean final audit; real pid reuse obtained twice; llama-server b11440 probed without a model (kept separate).
 - [x] 2026-10-12 E1 evidence record written. Independent review not requested (owner: not needed unless a high-risk architectural issue emerges; none did, but see the residual in report F6).
 - [x] 2026-10-12 Reproducibility re-run attempted twice; interrupted by host sleep on battery (both partials preserved); S1–S3 reproduced identically, S4–S7 **not** reproduced.
-- [ ] Clean full E1 re-run on AC power with the host awake (outstanding; validation strategy §7).
+- [x] 2026-10-13 Clean full E1 re-run completed with the host awake: 772 trials, 0 failed, verdicts identical to the main run, real pid reuse obtained twice (report §1). Still on battery and memory-pressure level 2, so AC-power behavior remains unmeasured.
 - [ ] Owner decision on the partial model file and the discovery items (report §8); owner authorization of the model download and size cap (separate; E2 blocked until then).
 - [ ] E2, E3.
 - [ ] Synthesis and recommendation for a 0B-2 implementation plan.
