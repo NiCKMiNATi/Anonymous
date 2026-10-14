@@ -1,0 +1,42 @@
+{
+  "cap_bytes": 3221225472,
+  "cumulative_bytes": 2497280256,
+  "attempts": [
+    {
+      "url": "https://huggingface.co/Qwen/Qwen3-4B-GGUF/resolve/bc640142c66e1fdd12af0bd68f40445458f3869b/Qwen3-4B-Q4_K_M.gguf",
+      "start_utc": "2026-10-14T14:50:50Z",
+      "range_requested": false,
+      "token_sent": false,
+      "partial_before": {
+        "size": 1786773504,
+        "mtime_ns": 1791293929770308090
+      },
+      "http_status": 200,
+      "final_host": "us.aws.cdn.hf.co",
+      "hops": [
+        {
+          "status": 302,
+          "host": "huggingface.co",
+          "to_host": "us.aws.cdn.hf.co",
+          "x-repo-commit": "bc640142c66e1fdd12af0bd68f40445458f3869b",
+          "x-linked-size": "2497280256",
+          "x-linked-etag": "\"7485fe6f11af29433bc51cab58009521f205840f5b4ae3a32fa7f92e8534fdf5\""
+        }
+      ],
+      "content_length": "2497280256",
+      "etag": "\"9375c1fd02b321abc3f51b69ff7fcdd187af17f0d694c5b05000b54664292e17\"",
+      "bytes_transferred": 2497280256,
+      "elapsed_s": 116.96,
+      "sha256_of_received": "7485fe6f11af29433bc51cab58009521f205840f5b4ae3a32fa7f92e8534fdf5",
+      "size_match": true,
+      "sha256_match": true,
+      "outcome": "VERIFIED",
+      "partial_after": {
+        "size": 1786773504,
+        "mtime_ns": 1791293929770308090
+      },
+      "partial_untouched": true
+    }
+  ],
+  "cap_remaining_bytes": 723945216
+}
