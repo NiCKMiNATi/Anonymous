@@ -54,6 +54,9 @@ class StubProbes(E.HostProbes):
         self.hid = 5.0
         self.n = 0
         self.fail_left, self.fail_always, self.jump_at, self.swap_seq = 0, False, None, None
+        # The synthetic wall clock is derived from the uptime clock, so a real host sleep or wall-clock
+        # step cannot produce a wall/uptime skew (S6); only ``sleep_jump`` can.
+        self._wall0, self._up0 = time.time(), time.clock_gettime(time.CLOCK_UPTIME_RAW)
 
     def sample(self):
         self.n += 1
@@ -62,7 +65,8 @@ class StubProbes(E.HostProbes):
         if self.fail_always or self.fail_left > 0:
             self.fail_left = max(0, self.fail_left - 1)
             raise RuntimeError("synthetic probe failure")
-        return {"wall": time.time() + self.sleep_jump, "up": time.clock_gettime(time.CLOCK_UPTIME_RAW), "src": self.src,
+        up = time.clock_gettime(time.CLOCK_UPTIME_RAW)
+        return {"wall": self._wall0 + (up - self._up0) + self.sleep_jump, "up": up, "src": self.src,
                 "press": self.pressure_v, "swap": self.swap, "free": self.free, "pageouts": 100, "swapouts": 50}
 
     def swap_mib(self):
@@ -1892,6 +1896,8 @@ class TestEvidenceIntegrity(Base):
         res = self.run_all()
         self.assertEqual(res["outcome"], "STOPPED")
         self.assertEqual(res["interpretation"], "INTERRUPTED_ENVIRONMENT")
+        # the injected interrupt must be the only stop, so any other (environmental) stop is visible here
+        self.assertEqual([(s["id"], s["why"]) for s in res["stops"]], [("S11", "operator interrupt")])
         self.assertEqual([t["status"] for t in res["phase3"]["trials"]], ["PASS"] * 7)
         self.assert_no_verdict(res["rows"])
         # the observations survive; only the verdicts are withheld
