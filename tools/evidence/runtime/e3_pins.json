@@ -1,0 +1,11 @@
+{
+ "schema": 1,
+ "note": "Pins for the E3 pilot. Hashes, sizes and states only; fixture content lives outside the repository. The harness refuses to run unless fixture_g.state is APPROVED_BY_OWNER. Changing this file changes the implementation identity that the authorization binds.",
+ "fixture_g": {
+  "state": "APPROVED_BY_OWNER",
+  "bytes": 605,
+  "sha256": "ca2cdcc25dd149b8ac47c4e01ae57782bbb8c11f4e9d122af6f2f4a52bcebc6b",
+  "max_tokens": 384,
+  "file": "fixtures/e3/G.json"
+ }
+}
