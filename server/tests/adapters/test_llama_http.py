@@ -3,7 +3,8 @@
 Synthetic data only. Every scenario runs through the real coordinator, worker, settler and SQLite
 store; only the runtime process is faked. What is pinned here:
 
-* a complete, attributable, accepted response publishes through T4 and frees the slot;
+* a complete, attributable, accepted response publishes through T4 and frees the slot (an exact
+  ``length`` finish publishes the same way, visibly truncated, ADR-0016);
 * a rejected, ambiguous or failed response never settles through B3/B4/B5: it quarantines;
 * the binding says ``external`` with no declared bases, and nothing sensitive reaches records/logs;
 * only ``POST /v1/chat/completions`` is ever requested.
@@ -29,6 +30,7 @@ from anonymous.adapters.model.llama_launch_record import ArtifactIdentity
 from anonymous.adapters.model.process_identity import ProcessIdentity
 from anonymous.adapters.persistence.sqlite.store import SqliteStore
 from anonymous.application.ports.model import (
+    Completed,
     ContextMessage,
     Failed,
     Knowledge,
@@ -41,9 +43,15 @@ from anonymous.application.ports.model import (
 )
 from anonymous.application.supervisor import ExecutionSettings
 from anonymous.domain.errors import RuntimeQuarantined
-from anonymous.domain.evidence import EvidenceBasis, Handoff, HandoffOutcome, LifetimeScope
+from anonymous.domain.evidence import (
+    CompletionObserved,
+    EvidenceBasis,
+    Handoff,
+    HandoffOutcome,
+    LifetimeScope,
+)
 from anonymous.domain.ids import ConversationId, SubmissionId, UserId, new_uuid
-from anonymous.domain.models import Message, MessageRole, ModelRun, RunStatus
+from anonymous.domain.models import Completeness, Message, MessageRole, ModelRun, RunStatus
 from anonymous.domain.provenance import Verification
 from tests.adapters.llama_fakes import (
     FAKE_PID,
@@ -180,6 +188,180 @@ def test_a_label_only_artifact_carries_no_digest(
     assert prepared.model_artifact.verification is Verification.UNSPECIFIED
 
 
+# -- ADR-0016: an exact "length" delivery publishes as a visibly truncated message -----------------
+
+
+def length_body(content: str = "The three colors are red, orange and") -> bytes:
+    payload = {"choices": [{"message": {"content": content}, "finish_reason": "length"}]}
+    return json.dumps(payload).encode()
+
+
+def test_a_stop_response_is_published_as_complete(rig: Rig) -> None:
+    run, message = rig.send()
+    assert run.status is RunStatus.SUCCEEDED and message is not None
+    assert message.completeness is Completeness.COMPLETE
+
+
+def test_a_length_response_publishes_through_t4_as_truncated_without_new_claims(
+    rig: Rig, store: SqliteStore
+) -> None:
+    rig.server.reply, rig.server.finish_reason = "The three colors are red, orange and", "length"
+    run, message = rig.send()
+    assert run.status is RunStatus.SUCCEEDED and message is not None
+    assert message.content == "The three colors are red, orange and"  # the text is untouched
+    assert message.completeness is Completeness.TRUNCATED
+    assert message.produced_by_run_id == run.id
+    # Exactly what any accepted delivery claims (ADR-0015 point 1): nothing about the process,
+    # natural completion, idleness or B3, and the binding is still external with no declared bases.
+    assert run.termination_basis is EvidenceBasis.RUNTIME_REPORTED_TERMINAL
+    assert run.completion_observed is CompletionObserved.YES
+    binding = run.binding
+    assert binding is not None
+    assert binding.lifetime_scope is LifetimeScope.EXTERNAL
+    assert binding.declared_bases == frozenset() and binding.late_delivery_excluded is False
+    assert run.handoff is Handoff.STARTED and run.handoff_outcome is HandoffOutcome.UNKNOWN
+    # Persisted, and no quarantine: the slot is free for every conversation, including this one.
+    assert store.get_run(run.id).status is RunStatus.SUCCEEDED
+    assert store.generation_state().quarantined_runs == ()
+    other = rig.services.conversations.create_conversation(rig.owner).id
+    rig.server.finish_reason = "stop"
+    again, reply = rig.send("a normal follow-up")
+    elsewhere, second = rig.send("another conversation", other)
+    assert again.status is RunStatus.SUCCEEDED and reply is not None
+    assert reply.completeness is Completeness.COMPLETE
+    assert elsewhere.status is RunStatus.SUCCEEDED and second is not None
+    history = store.get_history(rig.owner, rig.cid).messages
+    assert [m.completeness for m in history] == [
+        None,
+        Completeness.TRUNCATED,
+        None,
+        Completeness.COMPLETE,
+    ]
+
+
+def test_a_truncated_reply_goes_back_to_the_model_verbatim_and_unmarked(rig: Rig) -> None:
+    rig.server.reply, rig.server.finish_reason = "red, orange and", "length"
+    rig.send("name colors")
+    rig.server.finish_reason = "stop"
+    rig.send("go on")
+    body = rig.server.requests[1].json()
+    assert [m["role"] for m in body["messages"]] == ["user", "assistant", "user"]
+    assert body["messages"][1] == {"role": "assistant", "content": "red, orange and"}
+    assert all(set(m) == {"role", "content"} for m in body["messages"])  # no marker field
+    assert "cut off" not in json.dumps(body) and "truncat" not in json.dumps(body)
+
+
+FRAMING_FAULTS = [
+    "short",
+    "chunked_truncated",
+    "close_delimited",
+    "both",
+    "dup_same",
+    "dup_conflict",
+    "invalid_length",
+]
+
+
+@pytest.mark.parametrize("framing", FRAMING_FAULTS)
+def test_a_length_finish_with_a_framing_fault_is_not_a_truncated_publication(
+    rig: Rig, framing: str
+) -> None:
+    rig.server.raw_body = length_body()  # a complete, valid length completion in the body ...
+    rig.server.framing = framing  # ... delivered with broken or ambiguous framing
+    run, message = rig.send()
+    assert_quarantined(rig, run, message)
+
+
+def test_a_complete_chunked_length_response_is_published_as_truncated(rig: Rig) -> None:
+    rig.server.raw_body = length_body()
+    rig.server.framing = "chunked"
+    run, message = rig.send()
+    assert run.status is RunStatus.SUCCEEDED and message is not None
+    assert message.completeness is Completeness.TRUNCATED
+
+
+@pytest.mark.parametrize("status", [400, 401, 404, 429, 500, 503])
+def test_a_length_body_in_an_http_error_is_not_published(rig: Rig, status: int) -> None:
+    rig.server.status, rig.server.raw_body = status, length_body()
+    run, message = rig.send()
+    assert_quarantined(rig, run, message)
+
+
+@pytest.mark.parametrize("fault", ["drop", "wrong_key"])
+def test_a_length_finish_with_a_dropped_or_refused_request_is_not_published(
+    rig: Rig, fault: str
+) -> None:
+    rig.server.finish_reason, rig.server.reply = "length", "cut off mid"
+    if fault == "drop":
+        rig.server.drop = True
+    else:
+        rig.server.require_key = "some-other-instances-key"
+    run, message = rig.send()
+    assert_quarantined(rig, run, message)
+
+
+def test_a_length_finish_after_the_deadline_is_not_published_and_cannot_release_the_slot(
+    store: SqliteStore, owner: UserId, tmp_path: Path, server: FakeLlamaServer
+) -> None:
+    server.delay, server.finish_reason, server.reply = 1.0, "length", "cut off mid"
+    rig = Rig(store, owner, tmp_path, server, settings=replace(FAST, deadline_seconds=0.3))
+    run, message = rig.send()
+    assert_quarantined(rig, run, message)
+    threading.Event().wait(1.2)  # the late length delivery arrives after closure
+    assert store.get_run(run.id).status is RunStatus.INDETERMINATE
+    assert store.get_history(owner, rig.cid).messages[-1].role is MessageRole.USER
+
+
+@pytest.mark.parametrize("change", ["process", "listener"])
+def test_a_length_finish_is_not_published_if_identity_changed_during_the_request(
+    store: SqliteStore, owner: UserId, tmp_path: Path, server: FakeLlamaServer, change: str
+) -> None:
+    server.delay, server.finish_reason, server.reply = 1.0, "length", "cut off mid"
+    rig = Rig(store, owner, tmp_path, server)
+
+    def swap() -> None:
+        if change == "process":
+            rig.inspector.identities[FAKE_PID] = ProcessIdentity(FAKE_PID, (FAKE_START[0] + 1, 0))
+        else:
+            rig.inspector.listener = ((FAKE_PID + 1, f"127.0.0.1:{rig.record.port}"),)
+
+    timer = threading.Timer(0.5, swap)
+    timer.start()
+    run, message = rig.send()
+    timer.join()
+    assert_quarantined(rig, run, message)
+
+
+def test_a_length_finish_from_an_unverifiable_runtime_is_never_requested(rig: Rig) -> None:
+    rig.server.finish_reason = "length"
+    rig.inspector.listener = ((FAKE_PID + 1, f"127.0.0.1:{rig.record.port}"),)
+    run, message = rig.send()
+    assert message is None and run.status is RunStatus.FAILED
+    assert rig.server.requests == []  # nothing was sent, so there is nothing to label
+
+
+def test_the_parsed_delivery_carries_exactly_the_two_distinct_flags(rig: Rig) -> None:
+    """The adapter's contract: stop is complete, exactly length is limit_reached, else neither."""
+    seen: dict[str | None, tuple[bool, bool]] = {}
+    for finish in ("stop", "length", None, "", "content_filter", "Length"):
+        rig.server.finish_reason, rig.server.reply = finish, "some text"
+        prepared = rig.runtime.prepare(f"a-{finish}")
+        assert isinstance(prepared, PreparedBinding)
+        attempt = f"a-{finish}"
+        assert rig.runtime.start(attempt, prepared.binding, _request(), 2.0) is StartAck.UNKNOWN
+        result = rig.runtime.await_result(attempt, prepared.binding, 2.0)
+        assert isinstance(result, Completed)
+        seen[finish] = (result.complete, result.limit_reached)
+    assert seen == {
+        "stop": (True, False),
+        "length": (False, True),
+        None: (False, False),
+        "": (False, False),
+        "content_filter": (False, False),
+        "Length": (False, False),
+    }
+
+
 # -- rejected and ambiguous responses never settle through B3/B4/B5 ------------------------------
 
 
@@ -194,7 +376,20 @@ def assert_quarantined(rig: Rig, run: ModelRun, message: object) -> None:
 
 @pytest.mark.parametrize(
     ("reply", "finish"),
-    [("cut off", "length"), ("", "stop"), ("   ", "stop"), ("odd", "content_filter"), ("x", None)],
+    [
+        ("", "stop"),
+        ("   ", "stop"),
+        ("", "length"),  # ADR-0016: an output-limit delivery with no content is still rejected
+        ("  \n ", "length"),
+        ("odd", "content_filter"),
+        ("odd", "tool_calls"),
+        ("x", None),
+        ("x", ""),
+        ("x", "Length"),  # only the exact finish reasons count
+        ("x", "LENGTH"),
+        ("x", "length "),
+        ("x", "stop "),
+    ],
 )
 def test_rejected_responses_quarantine_instead_of_settling(
     rig: Rig, reply: str, finish: str | None

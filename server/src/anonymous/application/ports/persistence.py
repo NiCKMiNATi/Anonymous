@@ -27,7 +27,7 @@ from anonymous.domain.evidence import (
     HandoffOutcome,
 )
 from anonymous.domain.ids import ConversationId, MessageId, RunId, SubmissionId, UserId
-from anonymous.domain.models import Conversation, Message, ModelRun, RunStatus
+from anonymous.domain.models import Completeness, Conversation, Message, ModelRun, RunStatus
 from anonymous.domain.provenance import ExecutionProvenance
 
 
@@ -203,9 +203,14 @@ class ExecutionStore(Protocol):
         """T3c (best effort; if lost the outcome stays unrecorded, treated as UNKNOWN)."""
         ...
 
-    def publish_response(self, run_id: RunId, content: str) -> PublishOutcome:
+    def publish_response(
+        self, run_id: RunId, content: str, completeness: Completeness | None = None
+    ) -> PublishOutcome:
         """T4: assistant message + ``succeeded`` atomically; needs an open fence and a started
-        handoff. An already published run returns ``PUBLISHED`` with the original message."""
+        handoff. An already published run returns ``PUBLISHED`` with the original message.
+
+        ``completeness`` (ADR-0016) is stored with the message in the same write; ``None`` means
+        unclassified. It never changes what T4 requires or stamps."""
         ...
 
     def close_run(

@@ -67,4 +67,4 @@ def test_health_reports_an_open_generation_state(db_path: Path) -> None:
     with open_client(db_path) as client:
         health = client.get(f"{BASE}/health").json()
         assert health["generation"]["state"] == "open"
-        assert health["schema_version"] == 2
+        assert health["schema_version"] == 3

@@ -24,9 +24,9 @@ def rows(db_path: Path, sql: str) -> list[tuple[object, ...]]:
 
 
 def test_migrate_creates_schema_and_is_idempotent(db_path: Path) -> None:
-    assert migrate(db_path) == 2
+    assert migrate(db_path) == 3
     first = rows(db_path, "SELECT version, name, checksum, applied_at FROM schema_migrations")
-    assert migrate(db_path) == 2  # nothing re-applied
+    assert migrate(db_path) == 3  # nothing re-applied
     assert (
         rows(db_path, "SELECT version, name, checksum, applied_at FROM schema_migrations") == first
     )
@@ -67,20 +67,20 @@ def test_new_migration_evolves_database_without_losing_data(db_path: Path) -> No
     conn.execute("INSERT INTO users (id, created_at) VALUES ('u1', '2026-01-01T00:00:00.000000Z')")
     conn.close()
     base = discover_migrations()
-    v3 = Migration(3, "add_nickname", "ALTER TABLE users ADD COLUMN nickname TEXT;")
-    assert migrate(db_path, [*base, v3]) == 3
+    v4 = Migration(4, "add_nickname", "ALTER TABLE users ADD COLUMN nickname TEXT;")
+    assert migrate(db_path, [*base, v4]) == 4
     assert rows(db_path, "SELECT id, nickname FROM users") == [("u1", None)]
-    assert [r[0] for r in rows(db_path, "SELECT version FROM schema_migrations")] == [1, 2, 3]
+    assert [r[0] for r in rows(db_path, "SELECT version FROM schema_migrations")] == [1, 2, 3, 4]
 
 
 def test_failed_migration_rolls_back_completely(db_path: Path) -> None:
     migrate(db_path)
     base = discover_migrations()
-    broken = Migration(3, "broken", "CREATE TABLE half_done (x); THIS IS NOT SQL;")
+    broken = Migration(4, "broken", "CREATE TABLE half_done (x); THIS IS NOT SQL;")
     with pytest.raises(StorageFailure):
         migrate(db_path, [*base, broken])
     assert rows(db_path, "SELECT name FROM sqlite_master WHERE name='half_done'") == []
-    assert [r[0] for r in rows(db_path, "SELECT version FROM schema_migrations")] == [1, 2]
+    assert [r[0] for r in rows(db_path, "SELECT version FROM schema_migrations")] == [1, 2, 3]
 
 
 def test_instance_guard_excludes_a_second_holder_until_released(db_path: Path) -> None:

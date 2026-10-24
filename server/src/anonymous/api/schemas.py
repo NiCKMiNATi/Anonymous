@@ -41,6 +41,9 @@ class MessageDto(BaseModel):
     content: str
     committed_at: str  # authoritative commit instant (absolute UTC)
     produced_by_run_id: str | None
+    # ADR-0016: whether an assistant answer ended naturally. null = unclassified (user messages and
+    # assistant messages that predate the field); never inferred from the run.
+    completeness: Literal["complete", "truncated"] | None = None
 
 
 class RunDto(BaseModel):
@@ -104,6 +107,7 @@ def message_dto(m: Message) -> MessageDto:
         content=m.content,
         committed_at=encode_instant(m.committed_at),
         produced_by_run_id=m.produced_by_run_id,
+        completeness=m.completeness.value if m.completeness is not None else None,
     )
 
 

@@ -29,6 +29,8 @@ export class FakeBackend {
   deferNextCommit = false;
   /** Next send is refused with this error. */
   refuseNextSend: { status: number; code: string; message: string } | null = null;
+  /** The next assistant reply is stored as cut off at the output limit (ADR-0016). */
+  truncateNextReply = false;
   /** Hold sends until released, to observe the in-progress state. */
   holdSends: Promise<void> | null = null;
 
@@ -186,7 +188,9 @@ export class FakeBackend {
         content: `Fake reply to: ${body.content}`,
         committed_at: this.nextInstant(),
         produced_by_run_id: run.id,
+        completeness: this.truncateNextReply ? "truncated" : "complete",
       };
+      this.truncateNextReply = false;
       detail.messages.push(assistant);
     }
     detail.runs.push(run);

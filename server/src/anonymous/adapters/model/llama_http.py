@@ -1,8 +1,8 @@
 """LlamaHttpRuntime — dev-only RuntimePort for an independently launched local llama.cpp server.
 
-ADR-0015 (Proposed). This adapter does NOT own the runtime process: the dev launcher started it,
-and it can outlive Anonymous (E3: it survives its owner and finishes the request it accepted). The
-binding therefore says what is true and claims nothing it cannot show:
+ADR-0015 (Accepted; amended by ADR-0016). This adapter does NOT own the runtime process: the dev
+launcher started it, and it can outlive Anonymous (E3: it survives its owner and finishes the
+request it accepted). The binding therefore says what is true and claims nothing it cannot show:
 
 * ``lifetime_scope = EXTERNAL`` (never ``owning_process``);
 * ``declared_bases`` is empty: no B3, B4 or B5 is claimed, so the router discards any such probe
@@ -21,8 +21,13 @@ What it does do:
   other local clients away from the runtime: possessing it proves nothing about the identity of the
   server that answered, and it is never used as attribution. Remaining race: a listener swapped
   between a check and its use (see ADR-0015);
-* every other outcome is ``POSSIBLY_ACTIVE`` (never ``ENDED``): an HTTP 4xx/5xx alone does not show
-  that generation ended, so it closes the attempt and quarantines the dev dataset;
+* the finish reason is a content label only (ADR-0016): exactly ``stop`` is a complete answer,
+  exactly ``length`` marks ``limit_reached`` (a complete, attributable delivery cut off at the
+  output limit), and a missing or any other finish is an unknown incomplete result that Anonymous
+  rejects. It is never evidence that the runtime stopped, is idle or ended the attempt;
+* every transport or identity failure is ``POSSIBLY_ACTIVE`` (never ``ENDED``): an HTTP 4xx/5xx
+  alone does not show that generation ended, so it closes the attempt and quarantines the dev
+  dataset;
 * ``stop`` is ``UNSUPPORTED`` and ``probe`` is never ``CONFIRMED_ENDED``.
 
 Request and response bodies, the key and every path are held in memory only: nothing here logs or
@@ -296,7 +301,7 @@ class LlamaHttpRuntime:
         parsed = _parse_chat_response(raw)
         if parsed is None:
             return _failed("runtime_error")
-        content, finished = parsed
+        content, finish = parsed
         # Attribution: before the response is accepted, the same process must still be live and
         # still be the sole listener on the exact address. The bearer key is not evidence.
         try:
@@ -309,7 +314,10 @@ class LlamaHttpRuntime:
             content=content,
             instance_ref=binding.instance_ref,
             model_label=binding.model_label,
-            complete=finished,
+            complete=finish == "stop",
+            # ADR-0016: exactly "length" is a delivered answer cut off at the output limit. A
+            # missing, null or any other finish stays an unknown incomplete result (rejected).
+            limit_reached=finish == "length",
         )
 
     def stop(self, attempt_id: str, binding: ExecutionBinding, deadline_seconds: float) -> StopAck:
@@ -364,8 +372,9 @@ def _read_body(response: http.client.HTTPResponse) -> bytes | None:
     return b"".join(parts)
 
 
-def _parse_chat_response(raw: bytes) -> tuple[str, bool] | None:
-    """``(content, finished_naturally)`` from a chat completion body, or ``None`` if malformed."""
+def _parse_chat_response(raw: bytes) -> tuple[str, str | None] | None:
+    """``(content, finish_reason)`` from a chat completion body, or ``None`` if malformed. The
+    finish reason is returned as sent (``None`` when absent); the caller decides what it means."""
     try:
         body: Any = json.loads(raw)
         choice = body["choices"][0]
@@ -377,7 +386,7 @@ def _parse_chat_response(raw: bytes) -> tuple[str, bool] | None:
         content = ""
     if not isinstance(content, str) or (finish is not None and not isinstance(finish, str)):
         return None
-    return content, finish == "stop"
+    return content, finish
 
 
 __all__ = ["ADAPTER_ID", "BINDING_FORMAT", "CHAT_PATH", "LlamaHttpRuntime"]

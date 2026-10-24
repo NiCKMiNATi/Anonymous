@@ -118,7 +118,15 @@ class Completed:
     content: str
     instance_ref: str  # the instance that actually delivered (verified by the adapter)
     model_label: str
-    complete: bool = True  # False: truncated / output limit
+    complete: bool = True  # False: an incomplete result (see ``limit_reached``)
+    # ADR-0016: set only by an adapter, for a delivery that is complete in framing and attribution
+    # and whose finish was exactly the output limit. It marks a visibly truncated answer, never an
+    # unknown incomplete one: ``complete=False`` without it stays rejected as ``output_truncated``.
+    limit_reached: bool = False
+
+    def __post_init__(self) -> None:
+        if self.complete and self.limit_reached:
+            raise ValueError("a delivery cannot be both complete and cut off at the output limit")
 
 
 @dataclass(frozen=True, slots=True)

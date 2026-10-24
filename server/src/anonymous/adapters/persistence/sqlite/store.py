@@ -72,6 +72,7 @@ from anonymous.domain.ids import (
 )
 from anonymous.domain.instants import decode_instant, encode_instant
 from anonymous.domain.models import (
+    Completeness,
     Conversation,
     Message,
     MessageRole,
@@ -99,6 +100,7 @@ def _message(row: sqlite3.Row) -> Message:
         content=row["content"],
         committed_at=decode_instant(row["committed_at"]),
         produced_by_run_id=RunId(row["produced_by_run_id"]) if row["produced_by_run_id"] else None,
+        completeness=Completeness(row["completeness"]) if row["completeness"] else None,
     )
 
 
@@ -812,7 +814,9 @@ class SqliteStore:
 
     # -- T4 ------------------------------------------------------------------------------------
 
-    def publish_response(self, run_id: RunId, content: str) -> PublishOutcome:
+    def publish_response(
+        self, run_id: RunId, content: str, completeness: Completeness | None = None
+    ) -> PublishOutcome:
         conn = connect(self._path)
         try:
             with write_transaction(conn):
@@ -843,8 +847,17 @@ class SqliteStore:
                 position = self._next_position(conn, conversation_id)
                 conn.execute(
                     "INSERT INTO messages (id, conversation_id, position, role, content,"
-                    " committed_at, produced_by_run_id) VALUES (?, ?, ?, 'assistant', ?, ?, ?)",
-                    (message_id, conversation_id, position, content, now, run_id),
+                    " committed_at, produced_by_run_id, completeness)"
+                    " VALUES (?, ?, ?, 'assistant', ?, ?, ?, ?)",
+                    (
+                        message_id,
+                        conversation_id,
+                        position,
+                        content,
+                        now,
+                        run_id,
+                        completeness.value if completeness is not None else None,
+                    ),
                 )
                 applied = self._update_run(
                     conn,

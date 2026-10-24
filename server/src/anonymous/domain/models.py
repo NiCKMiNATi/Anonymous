@@ -37,6 +37,14 @@ class MessageRole(StrEnum):
     ASSISTANT = "assistant"
 
 
+class Completeness(StrEnum):
+    """Whether an assistant answer ended naturally (ADR-0016). ``None`` on a message means
+    unclassified: every user message and every assistant message that predates the field."""
+
+    COMPLETE = "complete"
+    TRUNCATED = "truncated"  # cut off at the model's output limit; delivered completely
+
+
 class RunStatus(StrEnum):
     PENDING = "pending"  # accepted, user message committed, not yet dispatched
     IN_FLIGHT = "in_flight"  # dispatch association durable; invocation may have happened
@@ -81,6 +89,7 @@ class Message:
     content: str
     committed_at: datetime  # absolute instant of commitment; never an ordering authority
     produced_by_run_id: RunId | None  # set for assistant messages only
+    completeness: Completeness | None = None  # assistant messages only; None = unclassified
 
 
 @dataclass(frozen=True, slots=True)

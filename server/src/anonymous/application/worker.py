@@ -50,7 +50,7 @@ from anonymous.domain.evidence import (
     HandoffOutcome,
 )
 from anonymous.domain.ids import RunId
-from anonymous.domain.models import ModelRun, RunStatus
+from anonymous.domain.models import Completeness, ModelRun, RunStatus
 from anonymous.domain.provenance import ComponentIdentity, ExecutionProvenance, Verification
 
 logger = logging.getLogger("anonymous.worker")
@@ -383,13 +383,20 @@ class RunWorker:
         if delivery.model_label != bound_model:
             self._settle_known("model_identity_mismatch", "", CompletionObserved.YES)
             return self._outcome()
-        if not delivery.complete:
+        if not delivery.complete and not delivery.limit_reached:
+            # An incomplete result of unknown kind: rejected exactly as before (LD-04 P4).
             self._settle_known("output_truncated", "", CompletionObserved.YES)
             return self._outcome()
         if not delivery.content.strip():
             self._settle_known("empty_output", "", CompletionObserved.YES)
             return self._outcome()
-        return self._publish(delivery.content)
+        # ADR-0016: a complete, attributable, non-empty delivery whose adapter marked it as cut off
+        # at the output limit publishes through T4 like any accepted delivery, labelled truncated.
+        # T4 still claims accepted response delivery only (ADR-0015 point 1).
+        return self._publish(
+            delivery.content,
+            Completeness.TRUNCATED if delivery.limit_reached else Completeness.COMPLETE,
+        )
 
     def _settle_known(
         self, code: str, adapter_message: str, completion: CompletionObserved
@@ -409,13 +416,13 @@ class RunWorker:
 
     # -- T4 and the uncertain-publication cases (design §7) ------------------------------------
 
-    def _publish(self, content: str) -> SubmissionOutcome:
+    def _publish(self, content: str, completeness: Completeness) -> SubmissionOutcome:
         run_id = self._run.id
         self._checkpoint("before_publish", run_id)
         unreadable = False
         for _ in range(self._settings.republish_attempts):
             try:
-                outcome = self._store.publish_response(run_id, content)
+                outcome = self._store.publish_response(run_id, content, completeness)
             except StorageOutcomeUnknown:
                 # Case A/B/C: resolve by reading, never by calling the model again.
                 try:

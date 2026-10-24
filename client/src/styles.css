@@ -242,6 +242,15 @@ textarea:focus-visible {
   overflow-wrap: anywhere;
 }
 
+.message__notice {
+  margin-top: 0.4rem;
+  padding: 0.25rem 0.6rem;
+  border-left: 3px solid var(--accent);
+  font-size: 0.82rem;
+  font-style: italic;
+  color: var(--text);
+}
+
 .message__provenance {
   margin-top: 0.35rem;
   font-size: 0.72rem;

@@ -16,6 +16,12 @@ export interface MessageDto {
   content: string;
   committed_at: string; // authoritative commit instant (absolute UTC)
   produced_by_run_id: string | null;
+  /**
+   * ADR-0016: whether an assistant answer ended naturally. "truncated" means it was cut off at the
+   * model's output limit. null/absent means unclassified (user messages and older messages); it is
+   * never inferred from the run.
+   */
+  completeness?: "complete" | "truncated" | null;
 }
 
 export type RunStatus = "pending" | "in_flight" | "succeeded" | "failed" | "indeterminate";

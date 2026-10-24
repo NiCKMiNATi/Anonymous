@@ -31,6 +31,7 @@ from anonymous.application.ports.model import (
 )
 from anonymous.application.ports.persistence import WriteResult
 from anonymous.application.worker import ExecutionHandle
+from anonymous.domain.binding import ExecutionBinding
 from anonymous.domain.errors import RuntimeQuarantined
 from anonymous.domain.evidence import (
     ClosureReason,
@@ -42,7 +43,7 @@ from anonymous.domain.evidence import (
     basis_permitted_for_binding,
 )
 from anonymous.domain.ids import ConversationId, SubmissionId, UserId, new_uuid
-from anonymous.domain.models import ModelRun, RunStatus
+from anonymous.domain.models import Completeness, ModelRun, RunStatus
 from tests.conftest import FAST, Services
 from tests.doubles import Scheduler
 from tests.unit.test_architecture_boundaries import calls_of
@@ -132,6 +133,175 @@ def test_a_rejected_completion_does_not_settle_an_undeclared_external_binding(
         runtime.delivered_model_label = "some-other-model"
     services, _, cid = rig(store, owner, runtime)
     assert_unsettled_quarantine(store, services, owner, submit(services, owner, cid))
+
+
+# -- ADR-0016: an adapter-marked output-limit delivery publishes as truncated ----------------------
+
+
+class LimitScripted(DeclaringScripted):
+    """A scripted runtime that marks an incomplete delivery as cut off at the output limit."""
+
+    limit: bool = False
+
+    def await_result(
+        self, attempt_id: str, binding: ExecutionBinding, deadline_seconds: float
+    ) -> Completed | Failed:
+        result = super().await_result(attempt_id, binding, deadline_seconds)
+        if self.limit and isinstance(result, Completed) and not result.complete:
+            return replace(result, limit_reached=True)
+        return result
+
+
+def limited(content: str = "cut", **kw: object) -> LimitScripted:
+    runtime = LimitScripted(scope=LifetimeScope.EXTERNAL)
+    runtime.limit = True
+    runtime.result = lambda r: Completed(content, runtime.instance_ref, runtime.model_id, False)
+    for name, value in kw.items():
+        setattr(runtime, name, value)
+    return runtime
+
+
+def test_the_two_delivery_flags_cannot_contradict_each_other() -> None:
+    assert Completed("x", "i", "m", complete=True).limit_reached is False
+    assert Completed("x", "i", "m", complete=False).limit_reached is False  # unknown incomplete
+    assert Completed("x", "i", "m", complete=False, limit_reached=True).limit_reached is True
+    with pytest.raises(ValueError, match="both complete and cut off"):
+        Completed("x", "i", "m", complete=True, limit_reached=True)
+
+
+def test_a_marked_output_limit_delivery_publishes_as_truncated_for_an_undeclared_binding(
+    store: SqliteStore, owner: UserId
+) -> None:
+    services, _, cid = rig(store, owner, limited("The three colors are red, orange and"))
+    run = submit(services, owner, cid)
+    message = store.get_history(owner, cid).messages[-1]
+    assert run.status is RunStatus.SUCCEEDED
+    assert message.role.value == "assistant" and message.completeness is Completeness.TRUNCATED
+    assert message.content == "The three colors are red, orange and"
+    # Nothing but T4's accepted-delivery stamp, and the binding still declares nothing.
+    assert run.termination_basis is EvidenceBasis.RUNTIME_REPORTED_TERMINAL
+    assert run.binding is not None and run.binding.declared_bases == frozenset()
+    assert store.generation_state().quarantined_runs == ()
+    assert submit(services, owner, cid).status is RunStatus.SUCCEEDED  # the slot is free
+
+
+def test_an_unmarked_incomplete_delivery_is_still_rejected_and_quarantines(
+    store: SqliteStore, owner: UserId
+) -> None:
+    runtime = limited()
+    runtime.limit = False  # the adapter does not say the output limit was reached
+    services, _, cid = rig(store, owner, runtime)
+    assert_unsettled_quarantine(store, services, owner, submit(services, owner, cid))
+
+
+@pytest.mark.parametrize("content", ["", "   \n "])
+def test_an_output_limit_delivery_with_no_content_is_still_rejected(
+    store: SqliteStore, owner: UserId, content: str
+) -> None:
+    services, _, cid = rig(store, owner, limited(content))
+    assert_unsettled_quarantine(store, services, owner, submit(services, owner, cid))
+
+
+def test_an_output_limit_delivery_from_the_wrong_model_is_still_rejected(
+    store: SqliteStore, owner: UserId
+) -> None:
+    runtime = limited()
+    runtime.result = lambda r: Completed("cut", runtime.instance_ref, "some-other-model", False)
+    services, _, cid = rig(store, owner, runtime)
+    assert_unsettled_quarantine(store, services, owner, submit(services, owner, cid))
+
+
+def test_an_output_limit_delivery_from_another_instance_is_still_rejected(
+    store: SqliteStore, owner: UserId
+) -> None:
+    runtime = limited()
+    runtime.delivered_instance_ref = "some-other-instance"
+    services, _, cid = rig(store, owner, runtime)
+    run = submit(services, owner, cid)
+    assert run.status is RunStatus.INDETERMINATE
+    assert store.get_history(owner, cid).messages[-1].role.value == "user"
+
+
+def test_a_contradictory_delivery_is_an_adapter_fault_that_quarantines(
+    store: SqliteStore, owner: UserId
+) -> None:
+    runtime = external()
+    # Raised while the adapter builds its delivery: the worker treats it as possibly active.
+    runtime.result = lambda r: Completed("x", runtime.instance_ref, runtime.model_id, True, True)
+    services, _, cid = rig(store, owner, runtime)
+    run = submit(services, owner, cid)
+    assert_unsettled_quarantine(store, services, owner, run)
+    assert store.get_history(owner, cid).messages[-1].role.value == "user"
+
+
+def test_a_late_output_limit_delivery_cannot_release_or_publish(
+    store: SqliteStore, owner: UserId
+) -> None:
+    runtime = limited()
+    runtime.ignore_deadline = True
+    runtime.await_gate.arm()
+    services, _, cid = rig(store, owner, runtime, settings=replace(FAST, deadline_seconds=0.15))
+    handle = begin(services, owner, cid)
+    try:
+        deadline = time.monotonic() + 5
+        while store.get_run(handle.run_id).status is not RunStatus.INDETERMINATE:
+            assert time.monotonic() < deadline
+            time.sleep(0.01)
+    finally:
+        runtime.await_gate.release()
+    outcome = handle.wait(5)  # the hung attempt finally delivers a marked output-limit result
+    assert outcome.assistant_message is None
+    assert store.get_history(owner, cid).messages[-1].role.value == "user"
+    assert_unsettled_quarantine(store, services, owner, store.get_run(handle.run_id))
+
+
+def test_a_lost_publication_race_discards_a_truncated_output_too(
+    store: SqliteStore, owner: UserId
+) -> None:
+    services, scheduler, cid = rig(store, owner, limited())
+    before_publish = scheduler.hold("before_publish")
+    handle = begin(services, owner, cid)
+    assert before_publish.wait_reached()
+    services.coordinator.settler.close_and_verify(handle.run_id, ClosureReason.DEADLINE)
+    before_publish.release()
+    outcome = handle.wait(5)
+    assert outcome.assistant_message is None  # closure won; nothing was published
+    assert_unsettled_quarantine(store, services, owner, store.get_run(handle.run_id))
+
+
+# -- scripted runtimes: the existing contract is unchanged ---------------------------------------
+
+
+def test_a_scripted_incomplete_delivery_keeps_its_existing_rejection_for_a_declaring_binding(
+    store: SqliteStore, owner: UserId
+) -> None:
+    runtime = DeclaringScripted()  # owning process; the default declaration of the scripted adapter
+    runtime.declared = frozenset({EvidenceBasis.RUNTIME_REPORTED_TERMINAL})
+    runtime.result = lambda r: Completed("cut", runtime.instance_ref, runtime.model_id, False)
+    services, _, cid = rig(store, owner, runtime)
+    run = submit(services, owner, cid)
+    assert run.status is RunStatus.FAILED and run.failure_code == "output_truncated"
+    assert run.termination_basis is EvidenceBasis.RUNTIME_REPORTED_TERMINAL  # B3, as in LD-04 P4
+    assert run.completion_observed is CompletionObserved.YES
+    assert [m.role.value for m in store.get_history(owner, cid).messages] == ["user"]
+    assert store.generation_state().quarantined_runs == ()
+
+
+def test_the_scripted_runtime_never_marks_an_output_limit(
+    store: SqliteStore, owner: UserId
+) -> None:
+    """It re-wraps every result without the mark, so a scripted delivery cannot be published as
+    truncated: it keeps the pre-existing rejection."""
+    runtime = DeclaringScripted(scope=LifetimeScope.EXTERNAL)
+    runtime.result = lambda r: Completed("cut", runtime.instance_ref, runtime.model_id, False, True)
+    services, _, cid = rig(store, owner, runtime)
+    assert_unsettled_quarantine(store, services, owner, submit(services, owner, cid))
+
+
+def test_a_normal_scripted_success_is_a_complete_message(store: SqliteStore, owner: UserId) -> None:
+    services, _, cid = rig(store, owner, external())
+    submit(services, owner, cid)
+    assert store.get_history(owner, cid).messages[-1].completeness is Completeness.COMPLETE
 
 
 # -- late delivery and the publication race -------------------------------------------------------

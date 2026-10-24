@@ -35,7 +35,7 @@ def error_code(response) -> str:  # type: ignore[no-untyped-def]
 
 def test_health_reports_readiness_and_the_missing_security_layer(client: TestClient) -> None:
     body = client.get("/api/v1/health").json()
-    assert body["status"] == "ok" and body["storage"] == "ok" and body["schema_version"] == 2
+    assert body["status"] == "ok" and body["storage"] == "ok" and body["schema_version"] == 3
     assert "no authentication" in body["security"]
 
 

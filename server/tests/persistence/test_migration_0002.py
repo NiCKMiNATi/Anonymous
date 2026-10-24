@@ -26,7 +26,8 @@ USER = "00000000-0000-4000-8000-000000000001"
 LEGACY_TABLES = {
     "users": "SELECT * FROM users ORDER BY id",
     "conversations": "SELECT id, owner_user_id, title, created_at FROM conversations ORDER BY id",
-    "messages": "SELECT * FROM messages ORDER BY id",
+    "messages": "SELECT id, conversation_id, position, role, content, committed_at,"
+    " produced_by_run_id FROM messages ORDER BY id",  # the 0001 columns; 0003 adds one
     "submissions": "SELECT * FROM submissions ORDER BY submission_id",
     "model_runs": "SELECT id, conversation_id, triggering_message_id, status, model_id,"
     " runtime_id, failure_code, failure_message, requested_at, dispatched_at, settled_at"
@@ -138,7 +139,7 @@ def populated(path: Path) -> dict[str, str]:
 def test_every_legacy_fact_is_preserved_and_nothing_is_invented(db_path: Path) -> None:
     runs = populated(db_path)
     before = snapshot(db_path)
-    assert migrate(db_path) == 2
+    assert migrate(db_path) == len(discover_migrations())
     assert snapshot(db_path) == before  # byte-for-byte on every pre-existing column
 
     conn = sqlite3.connect(db_path)
@@ -354,7 +355,8 @@ def test_unresolved_legacy_executions_alone_do_not_stop_the_migration(db_path: P
     add_turn(conn, add_conversation(conn), "indeterminate")
     conn.commit()
     conn.close()
-    assert migrate(db_path) == 2  # representable, so it proceeds; dispatch stays blocked
+    # representable, so it proceeds; dispatch stays blocked
+    assert migrate(db_path) == len(discover_migrations())
 
 
 def test_failed_prechecks_name_the_violated_precondition_without_row_content(
