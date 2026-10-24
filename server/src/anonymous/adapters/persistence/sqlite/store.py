@@ -60,6 +60,7 @@ from anonymous.domain.evidence import (
     RecordEpoch,
     RunKind,
     admissible_bases,
+    basis_permitted_for_binding,
 )
 from anonymous.domain.ids import (
     ConversationId,
@@ -931,7 +932,16 @@ class SqliteStore:
         has_message = conn.execute(
             "SELECT 1 FROM messages WHERE produced_by_run_id = ?", (run_id,)
         ).fetchone()
-        if basis not in allowed:
+        binding = _binding(row)
+        if basis not in allowed or (
+            binding is not None
+            and not basis_permitted_for_binding(
+                basis, scope=binding.lifetime_scope, declared=binding.declared_bases
+            )
+        ):
+            # ADR-0015: an EXTERNAL binding cannot be settled on a runtime-asserting basis its
+            # adapter did not declare, whoever the caller is. No schema change: a Python check in
+            # the one transaction that settle_in_flight and settle_indeterminate share.
             return self._transition(conn, run_id, WriteResult.NO_ADMISSIBLE_BASIS)
         if has_message is not None:
             return self._transition(conn, run_id, WriteResult.WRONG_SOURCE)

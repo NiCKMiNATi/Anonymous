@@ -18,6 +18,7 @@ dev = [
 
 [project.scripts]
 anonymous-server = "anonymous.__main__:main"
+anonymous-llama-dev = "anonymous.adapters.model.llama_ctl:main"
 
 [build-system]
 requires = ["hatchling"]

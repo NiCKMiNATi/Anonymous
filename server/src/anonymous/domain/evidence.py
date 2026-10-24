@@ -64,6 +64,30 @@ class RunKind(StrEnum):
     RETRY = "retry"
 
 
+# Bases that assert something about the runtime's own execution (B3-B5). B1 and B2 are facts of
+# Anonymous's own durable handoff record.
+RUNTIME_ASSERTING_BASES = frozenset(
+    {
+        EvidenceBasis.RUNTIME_REPORTED_TERMINAL,
+        EvidenceBasis.PROCESS_EXIT_VERIFIED,
+        EvidenceBasis.EXECUTION_TERMINATED_VERIFIED,
+    }
+)
+
+
+def basis_permitted_for_binding(
+    basis: EvidenceBasis, *, scope: LifetimeScope, declared: frozenset[EvidenceBasis]
+) -> bool:
+    """An ``EXTERNAL`` binding may rely on a runtime-asserting basis only if its adapter declared
+    it (ADR-0015). Owning-process bindings are unchanged (design §4.8); B1/B2 need no declaration.
+    Pure; enforced both by the settler and inside the store's settlement transaction."""
+    return not (
+        scope is LifetimeScope.EXTERNAL
+        and basis in RUNTIME_ASSERTING_BASES
+        and basis not in declared
+    )
+
+
 def admissible_bases(
     *,
     epoch: RecordEpoch,

@@ -18,6 +18,62 @@ DEFAULT_DEV_CLIENT_ORIGINS = (
 _LOOPBACK_AUTHORITIES = ("127.0.0.1", "localhost", "[::1]")
 
 
+RUNTIME_FAKE = "fake"
+RUNTIME_LLAMA_DEV = "llama-dev"  # ADR-0015: dev-only external llama.cpp runtime, explicit opt-in
+DEV_DATASET_SUFFIX = "-dev.sqlite3"
+DEFAULT_LLAMA_MAX_TOKENS = 384
+DEFAULT_LLAMA_MAX_INPUT_CHARS = 1400  # conservative for a 2048-token context (see ADR-0015)
+MAX_LLAMA_MAX_TOKENS = 1024
+MAX_LLAMA_MAX_INPUT_CHARS = 4000
+
+
+class RuntimeConfigurationError(Exception):
+    """The runtime selection is inconsistent or unsafe. The message is fixed text, no values."""
+
+
+def require_dev_dataset(db_path: Path) -> None:
+    """The real-model adapter may only run on a dedicated, canonical development dataset.
+
+    The path must already be absolute-canonical as given (no ``..``, no symlink anywhere in it) and
+    name a ``*-dev.sqlite3`` file. This guards against accidents; it cannot know what the dataset
+    contains. Synthetic development data only.
+    """
+    raw = Path(db_path).expanduser()
+    if ".." in raw.parts:
+        raise RuntimeConfigurationError("the dev dataset path must not contain '..'")
+    absolute = Path(os.path.abspath(raw))
+    name = absolute.name
+    if not name.endswith(DEV_DATASET_SUFFIX) or name == DEV_DATASET_SUFFIX:
+        raise RuntimeConfigurationError(
+            f"the external runtime needs a dedicated dev dataset named '*{DEV_DATASET_SUFFIX}'"
+        )
+    for candidate in (absolute, *absolute.parents):
+        if candidate.is_symlink():
+            raise RuntimeConfigurationError("the dev dataset path must not contain a symlink")
+    if Path(os.path.realpath(absolute)) != absolute:
+        raise RuntimeConfigurationError("the dev dataset path must be canonical")
+
+
+def validate_runtime_settings(settings: Settings) -> None:
+    """Fail closed before anything is opened. The fake model is the default and needs nothing."""
+    if settings.runtime == RUNTIME_FAKE:
+        if settings.llama_launch_record is not None:
+            raise RuntimeConfigurationError(
+                "a llama launch record is set but the runtime is not 'llama-dev'"
+            )
+        return
+    if settings.runtime != RUNTIME_LLAMA_DEV:
+        raise RuntimeConfigurationError("unknown runtime selection")
+    record = settings.llama_launch_record
+    if record is None or not Path(record).expanduser().is_absolute():
+        raise RuntimeConfigurationError("'llama-dev' needs an absolute launch record path")
+    if not 1 <= settings.llama_max_tokens <= MAX_LLAMA_MAX_TOKENS:
+        raise RuntimeConfigurationError("llama max tokens is out of range")
+    if not 1 <= settings.llama_max_input_chars <= MAX_LLAMA_MAX_INPUT_CHARS:
+        raise RuntimeConfigurationError("llama max input characters is out of range")
+    require_dev_dataset(settings.db_path)
+
+
 @dataclass(frozen=True, slots=True)
 class Settings:
     db_path: Path = Path(".anonymous-data/anonymous-0b1-dev.sqlite3")
@@ -25,6 +81,10 @@ class Settings:
     port: int = DEFAULT_PORT
     client_dist: Path | None = None
     fake_delay_seconds: float = 0.0
+    runtime: str = RUNTIME_FAKE
+    llama_launch_record: Path | None = None
+    llama_max_tokens: int = DEFAULT_LLAMA_MAX_TOKENS
+    llama_max_input_chars: int = DEFAULT_LLAMA_MAX_INPUT_CHARS
     extra_allowed_origins: tuple[str, ...] = field(
         default_factory=lambda: DEFAULT_DEV_CLIENT_ORIGINS
     )
@@ -39,6 +99,18 @@ class Settings:
             port=int(os.environ.get("ANONYMOUS_PORT", defaults.port)),
             client_dist=Path(dist) if dist else None,
             fake_delay_seconds=float(os.environ.get("ANONYMOUS_FAKE_DELAY_SECONDS", "0")),
+            runtime=os.environ.get("ANONYMOUS_RUNTIME", defaults.runtime),
+            llama_launch_record=(
+                Path(record)
+                if (record := os.environ.get("ANONYMOUS_LLAMA_LAUNCH_RECORD"))
+                else None
+            ),
+            llama_max_tokens=int(
+                os.environ.get("ANONYMOUS_LLAMA_MAX_TOKENS", defaults.llama_max_tokens)
+            ),
+            llama_max_input_chars=int(
+                os.environ.get("ANONYMOUS_LLAMA_MAX_INPUT_CHARS", defaults.llama_max_input_chars)
+            ),
         )
 
     def allowed_hosts(self) -> tuple[str, ...]:

@@ -11,6 +11,8 @@ from pathlib import Path
 from anonymous.adapters.clock import SystemClock
 from anonymous.adapters.model.fake import FakeModelAdapter
 from anonymous.adapters.model.inprocess import InProcessRuntime
+from anonymous.adapters.model.llama_http import LlamaHttpRuntime
+from anonymous.adapters.model.llama_launch_record import LaunchRecordError, read_key, read_record
 from anonymous.adapters.persistence.sqlite.instance_guard import InstanceGuard
 from anonymous.adapters.persistence.sqlite.migrations import migrate
 from anonymous.adapters.persistence.sqlite.store import SqliteStore
@@ -26,7 +28,12 @@ from anonymous.application.ports.model import RuntimePort, SynchronousModel
 from anonymous.application.ports.persistence import Clock
 from anonymous.application.reconcile import ReconcileReport
 from anonymous.application.supervisor import Checkpoint, ExecutionSettings, no_checkpoint
-from anonymous.config import Settings
+from anonymous.config import (
+    RUNTIME_LLAMA_DEV,
+    RuntimeConfigurationError,
+    Settings,
+    validate_runtime_settings,
+)
 from anonymous.domain.ids import UserId
 from anonymous.domain.provenance import ComponentIdentity
 
@@ -67,6 +74,24 @@ def _application_build() -> ComponentIdentity:
     return ComponentIdentity.label_only(f"anonymous-server {version}")
 
 
+def preflight_runtime(settings: Settings) -> None:
+    """Everything about the runtime selection that can be checked before any side effect.
+
+    For the dev-only external runtime this includes loading the launch record and key file:
+    missing, unsafe or malformed launch metadata refuses startup before the dataset is created or
+    migrated (ADR-0015). Whether the recorded process is live is checked per attempt, not here.
+    """
+    validate_runtime_settings(settings)
+    if settings.runtime == RUNTIME_LLAMA_DEV:
+        assert settings.llama_launch_record is not None  # validated above
+        try:
+            read_key(read_record(settings.llama_launch_record))
+        except LaunchRecordError as error:
+            raise RuntimeConfigurationError(
+                f"the llama launch record or its key file is missing or invalid ({error.code})"
+            ) from error
+
+
 def build_application(
     settings: Settings,
     *,
@@ -81,6 +106,7 @@ def build_application(
 
     Readiness is only reached after this returns, i.e. after recovery (architecture C10).
     """
+    preflight_runtime(settings)  # before anything is opened or created; fails closed (ADR-0015)
     _prepare_data_dir(settings.db_path)
     guard = InstanceGuard(settings.db_path)
     guard.acquire()
@@ -96,6 +122,17 @@ def build_application(
         chosen_runtime: RuntimePort
         if runtime is not None:
             chosen_runtime = runtime
+        elif settings.runtime == RUNTIME_LLAMA_DEV:
+            assert settings.llama_launch_record is not None  # validated above
+            logger.warning(
+                "EXTERNAL RUNTIME (dev, ADR-0015): synthetic data only; a non-clean outcome can"
+                " quarantine this dataset permanently"
+            )
+            chosen_runtime = LlamaHttpRuntime(
+                settings.llama_launch_record,
+                max_tokens=settings.llama_max_tokens,
+                max_input_chars=settings.llama_max_input_chars,
+            )
         else:
             chosen_runtime = InProcessRuntime(
                 model or FakeModelAdapter(delay_seconds=settings.fake_delay_seconds)

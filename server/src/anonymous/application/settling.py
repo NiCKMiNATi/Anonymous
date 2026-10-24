@@ -38,6 +38,7 @@ from anonymous.domain.evidence import (
     Handoff,
     HandoffOutcome,
     admissible_bases,
+    basis_permitted_for_binding,
 )
 from anonymous.domain.ids import RunId
 from anonymous.domain.models import ModelRun, RunStatus
@@ -95,6 +96,15 @@ class RunSettler:
         unknown = 0
         for _ in range(_MAX_VERSION_RETRIES):
             run = self._store.get_run(run_id)
+            if run.binding is not None and not basis_permitted_for_binding(
+                basis, scope=run.binding.lifetime_scope, declared=run.binding.declared_bases
+            ):
+                # Every B3-shaped path ends here (a rejected or late delivery, a terminal failure,
+                # a lost publication race, a probe result). An undeclared claim settles nothing:
+                # the run stays closed and, if unresolved, quarantined. The store enforces the
+                # same rule inside its settlement transaction (defence in depth, ADR-0015).
+                logger.warning("evidence not declared for this binding run=%s (ignored)", run_id)
+                return None
             try:
                 if run.status is RunStatus.IN_FLIGHT:
                     result = self._store.settle_in_flight(
@@ -181,13 +191,20 @@ class RunSettler:
                 CompletionObserved.NO,
                 closure_reason,
             )
+        binding = run.binding
         allowed = admissible_bases(
             epoch=run.record_epoch,
             handoff=run.handoff,
             outcome=run.handoff_outcome,
             late_delivery_excluded=run.binding_late_delivery_excluded(),
         )
-        binding = run.binding
+        allowed = frozenset(
+            basis
+            for basis in allowed
+            if basis_permitted_for_binding(
+                basis, scope=binding.lifetime_scope, declared=binding.declared_bases
+            )
+        )  # an undeclared runtime-asserting basis is never accepted (ADR-0015)
         deadline = self._settings.control_deadline_seconds
         # Stop is an instruction, never evidence. It follows durable closure (SP-10).
         self._router.stop(run.id, binding, run.execution_boot_id, deadline)

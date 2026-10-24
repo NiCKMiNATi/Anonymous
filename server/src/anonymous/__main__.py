@@ -17,7 +17,8 @@ from pathlib import Path
 import uvicorn
 
 from anonymous.api.app import create_app
-from anonymous.config import LOOPBACK_HOSTS, Settings
+from anonymous.composition import preflight_runtime
+from anonymous.config import LOOPBACK_HOSTS, RuntimeConfigurationError, Settings
 
 _DEFAULT_CLIENT_DIST = Path(__file__).resolve().parents[3] / "client" / "dist"
 
@@ -32,6 +33,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--db-path", type=Path, help="SQLite development database file")
     parser.add_argument("--client-dist", type=Path, help="built client directory to serve at /")
     parser.add_argument("--fake-delay-seconds", type=float, help="simulated fake-model latency")
+    parser.add_argument(
+        "--runtime",
+        choices=("fake", "llama-dev"),
+        help="model runtime (default fake). 'llama-dev' is the dev-only external llama.cpp"
+        " adapter (ADR-0015): synthetic data only, needs --llama-launch-record and a *-dev.sqlite3",
+    )
+    parser.add_argument(
+        "--llama-launch-record", type=Path, help="launch record written by anonymous-llama-dev"
+    )
     args = parser.parse_args(argv)
 
     settings = Settings.from_env()
@@ -41,6 +51,8 @@ def main(argv: list[str] | None = None) -> int:
         "db_path": args.db_path,
         "client_dist": args.client_dist,
         "fake_delay_seconds": args.fake_delay_seconds,
+        "runtime": args.runtime,
+        "llama_launch_record": args.llama_launch_record,
     }
     settings = replace(settings, **{k: v for k, v in overrides.items() if v is not None})
     if settings.client_dist is None and (_DEFAULT_CLIENT_DIST / "index.html").is_file():
@@ -52,6 +64,12 @@ def main(argv: list[str] | None = None) -> int:
             " listen on loopback (127.0.0.1, ::1, localhost).",
             file=sys.stderr,
         )
+        return 2
+
+    try:
+        preflight_runtime(settings)
+    except RuntimeConfigurationError as error:
+        print(f"Refusing to start: {error}.", file=sys.stderr)
         return 2
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
