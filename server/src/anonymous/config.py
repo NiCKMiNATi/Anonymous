@@ -25,6 +25,22 @@ DEFAULT_LLAMA_MAX_TOKENS = 384
 DEFAULT_LLAMA_MAX_INPUT_CHARS = 1400  # conservative for a 2048-token context (see ADR-0015)
 MAX_LLAMA_MAX_TOKENS = 1024
 MAX_LLAMA_MAX_INPUT_CHARS = 4000
+# The launcher fixes ``-c 2048 -np 1`` (the E2-B/E3 profile); a test keeps the two equal.
+PINNED_CONTEXT_TOKENS = 2048
+# Allowance for chat-template tokens (about 5 per message plus the generation prompt). An
+# engineering allowance covering dozens of messages, not a measurement.
+TEMPLATE_RESERVE_TOKENS = 256
+
+
+def llama_budget_fits(max_tokens: int, max_input_chars: int) -> bool:
+    """Whether the input cap and the output cap can share the pinned context window.
+
+    The input cap counts characters, so this treats one character as at most one token. That
+    holds for single-byte text and is not a worst case for other scripts (a token never covers
+    less than one byte), so passing it does not prove that a prompt fits; it only refuses
+    combinations that cannot fit even under that assumption. Anything beyond the window ends in
+    an HTTP error or a ``length`` finish, and both quarantine the dataset (ADR-0015)."""
+    return max_input_chars + max_tokens + TEMPLATE_RESERVE_TOKENS <= PINNED_CONTEXT_TOKENS
 
 
 class RuntimeConfigurationError(Exception):
@@ -71,6 +87,10 @@ def validate_runtime_settings(settings: Settings) -> None:
         raise RuntimeConfigurationError("llama max tokens is out of range")
     if not 1 <= settings.llama_max_input_chars <= MAX_LLAMA_MAX_INPUT_CHARS:
         raise RuntimeConfigurationError("llama max input characters is out of range")
+    if not llama_budget_fits(settings.llama_max_tokens, settings.llama_max_input_chars):
+        raise RuntimeConfigurationError(
+            "llama max input characters and max tokens do not fit the context window"
+        )
     require_dev_dataset(settings.db_path)
 
 

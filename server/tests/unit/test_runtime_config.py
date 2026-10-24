@@ -11,13 +11,19 @@ from pathlib import Path
 import pytest
 
 from anonymous import __main__ as entry
+from anonymous.adapters.model.llama_ctl import build_command
 from anonymous.composition import build_application
 from anonymous.config import (
+    DEFAULT_LLAMA_MAX_INPUT_CHARS,
+    DEFAULT_LLAMA_MAX_TOKENS,
     DEV_DATASET_SUFFIX,
+    PINNED_CONTEXT_TOKENS,
     RUNTIME_FAKE,
     RUNTIME_LLAMA_DEV,
+    TEMPLATE_RESERVE_TOKENS,
     RuntimeConfigurationError,
     Settings,
+    llama_budget_fits,
     require_dev_dataset,
     validate_runtime_settings,
 )
@@ -98,6 +104,90 @@ def test_incomplete_or_out_of_range_dev_settings_are_refused(
 ) -> None:
     with pytest.raises(RuntimeConfigurationError):
         validate_runtime_settings(dev(tmp_path, **change))
+
+
+# -- the output and input caps must share the pinned context window (Q5, configuration only) -------
+
+
+def test_the_pinned_context_window_is_the_one_the_launcher_starts() -> None:
+    """A different ``-c`` in the launch profile must force this budget to be revisited."""
+    command = build_command(
+        runtime_bin=Path("/x/llama-server"),
+        model=Path("/x/m.gguf"),
+        key_file=Path("/x/key"),
+        port=18080,
+        sandbox=False,
+    )
+    assert command[command.index("-c") + 1] == str(PINNED_CONTEXT_TOKENS)
+    assert command[command.index("-np") + 1] == "1"  # one slot: the whole window is one request's
+
+
+def test_the_shipped_defaults_fit_and_are_unchanged(tmp_path: Path) -> None:
+    assert (DEFAULT_LLAMA_MAX_TOKENS, DEFAULT_LLAMA_MAX_INPUT_CHARS) == (384, 1400)
+    assert llama_budget_fits(DEFAULT_LLAMA_MAX_TOKENS, DEFAULT_LLAMA_MAX_INPUT_CHARS)
+    spare = PINNED_CONTEXT_TOKENS - TEMPLATE_RESERVE_TOKENS - 1400 - 384
+    assert spare >= 0  # the defaults sit just inside the budget: output headroom costs input room
+    validate_runtime_settings(dev(tmp_path))
+
+
+@pytest.mark.parametrize(
+    ("max_tokens", "max_input_chars", "fits"),
+    [
+        (392, 1400, True),  # exactly the window: 1400 + 392 + 256 == 2048
+        (393, 1400, False),  # one token over
+        (384, 1408, True),
+        (384, 1409, False),  # one character over
+        (1, 1791, True),
+        (1, 1792, False),
+        (1024, 768, True),  # the largest output the range allows needs the smallest input
+        (1024, 769, False),
+        (1024, 1400, False),  # each value is individually in range, together they cannot fit
+        (384, 4000, False),
+        (1024, 4000, False),
+    ],
+)
+def test_the_joint_budget_is_exact_at_its_boundary(
+    tmp_path: Path, max_tokens: int, max_input_chars: int, fits: bool
+) -> None:
+    assert llama_budget_fits(max_tokens, max_input_chars) is fits
+    settings = dev(tmp_path, llama_max_tokens=max_tokens, llama_max_input_chars=max_input_chars)
+    if fits:
+        validate_runtime_settings(settings)
+    else:
+        with pytest.raises(RuntimeConfigurationError, match="do not fit the context window"):
+            validate_runtime_settings(settings)
+
+
+def test_the_ranges_are_still_checked_per_field_with_their_own_message(tmp_path: Path) -> None:
+    with pytest.raises(RuntimeConfigurationError, match="max tokens is out of range"):
+        validate_runtime_settings(dev(tmp_path, llama_max_tokens=0, llama_max_input_chars=100))
+    with pytest.raises(RuntimeConfigurationError, match="max input characters is out of range"):
+        validate_runtime_settings(dev(tmp_path, llama_max_tokens=8, llama_max_input_chars=0))
+
+
+def test_the_budget_applies_only_to_the_real_adapter() -> None:
+    """The fake model is the default and ignores the llama limits entirely."""
+    validate_runtime_settings(Settings(llama_max_tokens=1024, llama_max_input_chars=4000))
+
+
+def test_an_overflowing_environment_is_refused_before_any_side_effect(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setenv("ANONYMOUS_LLAMA_MAX_TOKENS", "1024")  # alone it is in range
+    db = tmp_path / "fresh" / "chat-dev.sqlite3"
+    code = entry.main(
+        [
+            "--runtime",
+            "llama-dev",
+            "--db-path",
+            str(db),
+            "--llama-launch-record",
+            str(tmp_path / "absent" / "launch.json"),
+        ]
+    )
+    assert code == 2
+    assert "do not fit the context window" in capsys.readouterr().err
+    assert not db.parent.exists()
 
 
 def test_a_stray_launch_record_with_the_fake_runtime_is_refused(tmp_path: Path) -> None:
