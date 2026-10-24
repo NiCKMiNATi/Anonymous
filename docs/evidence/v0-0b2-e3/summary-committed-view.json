@@ -1,0 +1,385 @@
+{
+ "run_id": "20261023T155329Z-03ee3c",
+ "scope": "e3-pilot-v1",
+ "outcome": "PILOT_COMPLETED",
+ "interpretation": null,
+ "stops": [],
+ "gate": {
+  "WINDOW": true,
+  "CONT": true,
+  "G1": true,
+  "G2": true,
+  "G3": true,
+  "G4": true,
+  "G5": true,
+  "G6": true,
+  "G7": true,
+  "G8": true,
+  "G9": true,
+  "G10": true,
+  "G11": true,
+  "G12": true
+ },
+ "controls_passed": true,
+ "trigger": {
+  "decision": "FIRE",
+  "polls": 16,
+  "consecutive": 15,
+  "slot_fields_seen": [
+   "id",
+   "id_task",
+   "is_processing",
+   "n_ctx",
+   "n_prompt_tokens",
+   "n_prompt_tokens_cache",
+   "n_prompt_tokens_processed",
+   "next_token",
+   "params",
+   "speculative"
+  ],
+  "n_decoded_last": 51,
+  "n_decoded_note": "diagnostic only; never part of the trigger",
+  "request_in_flight_s": 1.559
+ },
+ "timeline": {
+  "spawned_rel_s": -2.812,
+  "bound_rel_s": -1.71,
+  "request_sent_rel_s": -1.561,
+  "key_deleted_rel_s": 0.0,
+  "owner_dead_rel_s": 0.002,
+  "successor_start_rel_s": 0.028,
+  "reader_done_rel_s": 7.993,
+  "window_end_rel_s": 17.993
+ },
+ "reader": {
+  "status": 200,
+  "finish_reason": "length",
+  "prompt_tokens": 111,
+  "completion_tokens": 384,
+  "content_len": 2155,
+  "content_sha256": "814e176f1272ffee9aad0575ff67223b603c2be97e9f509eeb37819d1d01eea7",
+  "elapsed": 9.554268917,
+  "timed_out": false,
+  "error": null,
+  "client_completed": true
+ },
+ "orphan": {
+  "alive_at_first_successor_observation": true,
+  "first_observation_t_rel_s": 0.324,
+  "exited_by_itself": false,
+  "exit_cause": {
+   "cause": "SIGNALLED",
+   "by": [
+    "successor"
+   ],
+   "killing_or_quarantining_stop_seen": false,
+   "note": "the ledger covers only the experiment's own signallers; 'self_exit' means no experiment signal was recorded"
+  },
+  "window_s": 17.993,
+  "cpu_samples_diagnostic": [
+   {
+    "t_rel": 0.03,
+    "cpu_s": 3.33,
+    "alive": true
+   },
+   {
+    "t_rel": 1.1,
+    "cpu_s": 5.49,
+    "alive": true
+   },
+   {
+    "t_rel": 2.16,
+    "cpu_s": 7.68,
+    "alive": true
+   },
+   {
+    "t_rel": 3.23,
+    "cpu_s": 9.91,
+    "alive": true
+   },
+   {
+    "t_rel": 4.29,
+    "cpu_s": 12.1,
+    "alive": true
+   },
+   {
+    "t_rel": 5.35,
+    "cpu_s": 14.26,
+    "alive": true
+   },
+   {
+    "t_rel": 6.41,
+    "cpu_s": 16.45,
+    "alive": true
+   },
+   {
+    "t_rel": 7.48,
+    "cpu_s": 18.62,
+    "alive": true
+   },
+   {
+    "t_rel": 8.55,
+    "cpu_s": 19.62,
+    "alive": true
+   },
+   {
+    "t_rel": 9.63,
+    "cpu_s": 19.62,
+    "alive": true
+   },
+   {
+    "t_rel": 10.72,
+    "cpu_s": 19.63,
+    "alive": true
+   },
+   {
+    "t_rel": 11.81,
+    "cpu_s": 19.63,
+    "alive": true
+   },
+   {
+    "t_rel": 12.89,
+    "cpu_s": 19.63,
+    "alive": true
+   },
+   {
+    "t_rel": 13.98,
+    "cpu_s": 19.64,
+    "alive": true
+   },
+   {
+    "t_rel": 15.06,
+    "cpu_s": 19.64,
+    "alive": true
+   },
+   {
+    "t_rel": 16.13,
+    "cpu_s": 19.64,
+    "alive": true
+   },
+   {
+    "t_rel": 17.22,
+    "cpu_s": 19.65,
+    "alive": true
+   }
+  ],
+  "client_completion_note": "reader completion is a client-side fact, not server idleness"
+ },
+ "successor": {
+  "started": true,
+  "classifications": [
+   {
+    "t_rel": 0.324,
+    "verdict": "PROVEN_ALIVE",
+    "identity_gone": false
+   },
+   {
+    "t_rel": 1.065,
+    "verdict": "PROVEN_ALIVE",
+    "identity_gone": false
+   },
+   {
+    "t_rel": 2.066,
+    "verdict": "PROVEN_ALIVE",
+    "identity_gone": false
+   },
+   {
+    "t_rel": 5.064,
+    "verdict": "PROVEN_ALIVE",
+    "identity_gone": false
+   },
+   {
+    "t_rel": 10.072,
+    "verdict": "PROVEN_ALIVE",
+    "identity_gone": false
+   }
+  ],
+  "verified": true,
+  "checks": {
+   "identity_gone": true,
+   "recorded_descendants_dead": true,
+   "group_clear": true,
+   "tag_scan_clear": true,
+   "port_free": true
+  },
+  "exit_event": "NOTE_EXIT_observed",
+  "self_exit": false,
+  "terminated_by": "successor",
+  "signals": [
+   {
+    "sig": 15,
+    "sent": true,
+    "why": null
+   }
+  ],
+  "signals_by_successor": [
+   {
+    "sig": 15
+   }
+  ],
+  "final_t_rel_s": 18.18,
+  "exit_t_rel_s": 18.056
+ },
+ "owner_kill": {
+  "signal_sent": true,
+  "owner_returncode": -9,
+  "key_deleted_before_successor": true,
+  "t0_to_owner_dead_s": 0.002
+ },
+ "key_file": {
+  "deleted_at_t0_rel_s": 0.0,
+  "exists_after_kill": false
+ },
+ "http_after_kill": {
+  "driver_gate_attempts_after_close": 0,
+  "driver_gate_closed_at_t0_rel_s": -0.0,
+  "new_connections_seen_by_lsof_after_baseline": 0,
+  "method": "driver gate; lsof 1 Hz diff from the kill; blind interval = poll period"
+ },
+ "successor_sandbox": {
+  "network_denied_by_kernel": true,
+  "file_read_denied": [
+   "fixtures",
+   "models",
+   "run scratch"
+  ]
+ },
+ "successor_returncode": 0,
+ "backstop_used": null,
+ "quarantine_cleanup": null,
+ "record_state": "EXIT_VERIFIED",
+ "owner_review_required": false,
+ "owner_review_persisted": null,
+ "quarantine_takeover": null,
+ "exit": {
+  "exit_basis": "non_parent_kernel_identity_and_conjunction",
+  "exit_event": "NOTE_EXIT_observed",
+  "waitpid_evidence": false,
+  "cleared_by": "successor",
+  "terminated_by": "successor",
+  "exit_cause": "SIGNALLED",
+  "exit_by": [
+   "successor"
+  ],
+  "attribution_consistent": true
+ },
+ "signals": {
+  "driver": {
+   "attempted": 1,
+   "delivered": 1,
+   "refused": {}
+  },
+  "successor": {
+   "attempted": 1,
+   "delivered": 1,
+   "refused": {}
+  }
+ },
+ "signals_basis": "attempts that obtained the signal-ledger lock (the ledger file), plus lock-timeout refusals that the signalling process reported (``unrecorded``). A signaller that ended before it could report (for example a Successor stopped by the backstop) may have made further refused attempts that cannot be counted: the counts are a lower bound on attempts. ``delivered`` counts RECORDED deliveries (kill(2) returned success and the entry was appended): the ledger entry is written after kill(2), so a signaller that died between the two may have delivered a signal that is not recorded, and delivered is a lower bound too. kill(2) success is acceptance by the kernel, not an effect on the target.",
+ "owner_shutdown": null,
+ "rows": {
+  "rows": {
+   "O1_orphan_survival": "SUPPORTS (n=1: runtime alive at first successor classification)",
+   "O3_successor_classification_consistency": "SUPPORTS (n=1; consistency only: never PROVEN_TERMINATED while identity live)",
+   "O4_successor_termination": "SUPPORTS (n=1; kill by verified identity, non-parent conjunction, no waitpid evidence)",
+   "B4_successor_side": "SUPPORTS (conditional; n=1; harness-owned test configuration; not reproduced)",
+   "B3_instance_reported_terminal": "NOT_TESTED",
+   "B5_slot_idle": "NOT_TESTED",
+   "request_cancel": "NOT_TESTED",
+   "requester_disconnect": "NOT_TESTED",
+   "late_delivery_excluded": "NOT_TESTED",
+   "adoption_for_generation": "NOT_TESTED"
+  },
+  "observations": {
+   "O2_exited_by_itself_before_window_end": false,
+   "O2_exit_cause": {
+    "cause": "SIGNALLED",
+    "by": [
+     "successor"
+    ],
+    "killing_or_quarantining_stop_seen": false,
+    "note": "the ledger covers only the experiment's own signallers; 'self_exit' means no experiment signal was recorded"
+   },
+   "O5_reader_outcome_class": "COMPLETE_RESPONSE",
+   "O5_note": "one in-flight attempt; not B3; not a late_delivery_excluded qualification; client completion is not server idleness"
+  },
+  "notes": {},
+  "n": 1
+ },
+ "model_unchanged": true,
+ "seal": {
+  "interrupt_seen": false,
+  "passes": 1
+ },
+ "finalize_error": null,
+ "identities": {
+  "protocol_sha256": "ce1daa39962723decc10a31e63ccc45a21accf8d6b52a5a10e734f14cb6c0b0e",
+  "implementation": {
+   "e3_harness.py": "e31ebdaec65939909b18c83118a3948b0cf29157561fb6fc619a05809aff4745",
+   "e3_lib.py": "dcf5255e865946ab69548ba8da87b1c1da77ad82bb90f0f38aeaa6ca59dceee2",
+   "e3_owner.py": "6431a6169393e7411cd8ee27023508e212d267da7d7bc16de7ac872544057a68",
+   "e3_reader.py": "128ecc32cd5a513d0cc3ddd4b57b4a8bfd30302a5fddc89b84bd814e75eb4053",
+   "e3_successor.py": "6ac6f66fec0db2586d6ba89d59fa051846bbb58529cbc36505d83bc9ce24d74c",
+   "e2b_harness.py": "246c5c17697c2573492f889c8bf4fcff13e2c117395321f35f52362655e14dba",
+   "e2b_lib.py": "849415afb2625c47369a11857c8b5feae07999b1ef951ecd497be13ba8d0047f",
+   "e1_lib.py": "6190a9753955e336badc9bdaee4fae6343996cb3b5d9e500cf2b6dc98a6e2e4e",
+   "e2b_pins.json": "f25b500c5142b44455cb48f34ce28ccd22a874aecb5c52953266affe33f8bbed",
+   "e3_pins.json": "20026ac69abd8e1a008e9fe85da6bb40bb29681aaadcce112ce7da83497d4f4b"
+  },
+  "pins_in_use_canonical": "c635109f4145b126348a83e9327450bb3b14c9188b16a48d845e42585209ec8e"
+ },
+ "raw_artifacts": {
+  "events.jsonl": {
+   "bytes": 295,
+   "sha256": "7973e824bf190bb6580c4d25234820ca99c670f6b014ca62b86fe3302b949ef9"
+  },
+  "gate-window.jsonl": {
+   "bytes": 8529,
+   "sha256": "8cbdfa572fd89c44c1994e68a00ccdad1d0785878d9d908c76f8a405f6d3c681"
+  },
+  "gate-context.json": {
+   "bytes": 859,
+   "sha256": "290703d7c40e99c3d94d84b7884b5138fec65f503b8d1303e65419ed7aead8b0"
+  },
+  "series.jsonl": {
+   "bytes": 5665,
+   "sha256": "66c52e073ed23e651e0f3c5b6f5a944569756e2614b847d1be44b2b91042060b"
+  },
+  "post-unload.jsonl": {
+   "bytes": 8392,
+   "sha256": "90ddb39a9da479863937a54ea8d6704c22f6d9dd8faf788536d9e13a16d6ead2"
+  },
+  "server.log": {
+   "bytes": 2246,
+   "sha256": "96aff17391d42cf03d71bc20337010e293d86f3733fccb8e93d1b78e896186b2"
+  },
+  "summary.json": {
+   "bytes": 11570,
+   "sha256": "aa1d45d57a7d5eed6cbe0f73c6d7aa353e4fb0404d83787307743fe9c310aee1"
+  },
+  "signals.jsonl": {
+   "bytes": 488,
+   "sha256": "04b7261c7892bfc34e7af45147a44714147298991e7730535792e537d80bf26e"
+  },
+  "owner.jsonl": {
+   "bytes": 222,
+   "sha256": "644eec6bd301e836168f61b710062933ad58c1dee7ae8c36acf22d19c518c365"
+  },
+  "owner.err": {
+   "bytes": 0,
+   "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "reader.jsonl": {
+   "bytes": 394,
+   "sha256": "4553680993d1825b7dc756a8138a23ae14ca17c2c04fbe27726a33526d878280"
+  },
+  "successor.jsonl": {
+   "bytes": 1815,
+   "sha256": "79a7f3ea20da888dc12cc27882c2686a8b05002a970887df7098a92cd1937533"
+  },
+  "successor.err": {
+   "bytes": 0,
+   "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  }
+ }
+}
