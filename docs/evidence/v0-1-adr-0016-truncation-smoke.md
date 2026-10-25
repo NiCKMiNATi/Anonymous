@@ -9,7 +9,7 @@
 
 ## 1. Scope and criteria
 
-Authorized by the owner: one attended smoke, one browser-submitted message (prescribed text: `Explain in detail how a rainbow forms. Write at least five full paragraphs.`, 75 characters), `ANONYMOUS_LLAMA_MAX_TOKENS=64` so that the cutoff is reached quickly, no retry, a mandatory 10-sample host gate, identity-verified cleanup. Pass criteria: non-empty `length` reply; run `succeeded` with no failure code; assistant message `truncated`; notice visible and composer available; no quarantine; identical state after a restart; clean runtime stop. The result would have been INCONCLUSIVE had the model finished with `stop`; it did not.
+Authorized by the owner: one attended smoke, one browser-submitted message (one authorized synthetic browser message, 75 characters; prompt content omitted from the committed evidence), `ANONYMOUS_LLAMA_MAX_TOKENS=64` so that the cutoff is reached quickly, no retry, a mandatory 10-sample host gate, identity-verified cleanup. Pass criteria: non-empty `length` reply; run `succeeded` with no failure code; assistant message `truncated`; notice visible and composer available; no quarantine; identical state after a restart; clean runtime stop. The result would have been INCONCLUSIVE had the model finished with `stop`; it did not.
 
 ## 2. Host gate and runtime
 
@@ -30,7 +30,7 @@ Health `ok`; schema version 3 (`schema_migrations` 1, 2, 3; `messages.completene
 
 ## 4. Browser interaction (owner's report and screenshots)
 
-One conversation, one user message of 75 characters (equal to the prescribed message's length; the text was not inspected by the assistant). Nothing was submitted by curl, Python or any automated interface; no second message and no retry. The screenshot after the reply shows the reply, the italic notice "This reply was cut off at the model's output limit." and the composer available.
+One conversation, one authorized synthetic user message of 75 characters (equal to the authorized message's length; prompt content omitted from the committed evidence; the text was not inspected by the assistant). Nothing was submitted by curl, Python or any automated interface; no second message and no retry. The screenshot after the reply shows the reply, the italic notice "This reply was cut off at the model's output limit." and the composer available.
 
 ## 5. Persisted outcome (read-only database and API)
 
