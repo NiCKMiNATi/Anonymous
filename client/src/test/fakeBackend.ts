@@ -31,6 +31,8 @@ export class FakeBackend {
   refuseNextSend: { status: number; code: string; message: string } | null = null;
   /** The next assistant reply is stored as cut off at the output limit (ADR-0016). */
   truncateNextReply = false;
+  /** When a number, the next run records that many earliest messages as omitted (ADR-0017). */
+  omitNextContext: number | null = null;
   /** Hold sends until released, to observe the in-progress state. */
   holdSends: Promise<void> | null = null;
 
@@ -175,6 +177,19 @@ export class FakeBackend {
       failure_code: null,
       failure_message: null,
     };
+    if (this.omitNextContext !== null) {
+      run.context = {
+        first_message_id: "fake-first",
+        first_position: this.omitNextContext + 1,
+        selected_count: 2,
+        omitted_count: this.omitNextContext,
+        selected_chars: 20,
+        limit_chars: 30,
+        measure: "characters",
+        truncated_included_count: 0,
+      };
+      this.omitNextContext = null;
+    }
     let assistant: MessageDto | null = null;
     if (this.failGeneration) {
       run.status = "failed";

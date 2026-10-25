@@ -144,7 +144,7 @@ conversation C ── configuration binding (§11): effective configuration E (c
 - **C3.** All runs of one user message share its frontier. Retry applies only to the latest saved user message, so a retry's frontier equals the whole history through U. `retry_of` points only to earlier runs of the same message (acyclic, INV-011).
 - **C4.** The attempt id is application-generated, content-free and safe to send to the runtime and to logs. Runtime-assigned handles are evidence, not identity.
 - **C5.** The **binding** is determined by `prepare` and recorded in the same atomic step as dispatch authorization (T3), so a crash cannot leave a possibly-executing attempt without a recorded instance. It is opaque to the domain (no paths, secrets, content).
-- **C6.** In 0B the contributing messages are exactly the frontier (no omission). Per-message selection evidence arrives with LD-06.
+- **C6.** In 0B the contributing messages are exactly the frontier (no omission). Per-message selection evidence arrives with LD-06. *(Note, 2026-10-25: for conversations bound to `bounded-recent-history@1` the contributing messages are a contiguous recent suffix of the frontier and the run records its selection in dispatch provenance, [ADR-0017](../adr/0017-bounded-recent-history-context.md), Accepted 2026-10-25; this narrows only the v0.1 dev selection policy and does not settle LD-06. `whole-history@1` conversations are as above.)*
 - **C7.** Run facts are never relabeled: provenance, binding and outcome evidence of earlier runs are unchanged by retry, upgrade, adoption or runtime replacement.
 
 ## 3. Run lifecycle

@@ -26,6 +26,19 @@ export interface MessageDto {
 
 export type RunStatus = "pending" | "in_flight" | "succeeded" | "failed" | "indeterminate";
 
+/** ADR-0017: what the model's input contained, from the run's persisted dispatch provenance. */
+export interface ContextSelectionDto {
+  first_message_id: string;
+  first_position: number;
+  selected_count: number;
+  /** Earliest messages not sent to the model; they remain saved. */
+  omitted_count: number;
+  selected_chars: number;
+  limit_chars: number | null;
+  measure: "characters";
+  truncated_included_count: number;
+}
+
 export interface RunDto {
   id: string;
   triggering_message_id: string;
@@ -34,6 +47,8 @@ export interface RunDto {
   runtime_id: string | null;
   failure_code: string | null;
   failure_message: string | null;
+  /** null/absent: not recorded (whole-history runs, never-dispatched and older runs). */
+  context?: ContextSelectionDto | null;
 }
 
 export interface ConversationDetailDto {

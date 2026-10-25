@@ -13,9 +13,13 @@ interface Props {
  *
  * A truncated reply (ADR-0016) is labelled from the persisted message alone, as text beside the
  * unchanged content: never from the run's status and never by editing the content.
+ *
+ * Omitted earlier history (ADR-0017) is likewise shown from the producing run's persisted context
+ * selection only. No omission, or no recorded selection, means no notice.
  */
 export function MessageItem({ message, producingRun }: Props) {
   const isUser = message.role === "user";
+  const omitted = isUser ? 0 : (producingRun?.context?.omitted_count ?? 0);
   return (
     <li className={`message message--${message.role}`} data-testid={`message-${message.role}`}>
       <div className="message__meta">
@@ -32,6 +36,13 @@ export function MessageItem({ message, producingRun }: Props) {
       {message.completeness === "truncated" && (
         <div className="message__notice" role="note" data-testid="truncation-notice">
           This reply was cut off at the model's output limit.
+        </div>
+      )}
+      {omitted > 0 && (
+        <div className="message__notice" role="note" data-testid="omission-notice">
+          {omitted === 1
+            ? "The model did not receive the 1 earliest message. It remains saved above."
+            : `The model did not receive the ${omitted} earliest messages. They remain saved above.`}
         </div>
       )}
       {producingRun && producingRun.model_id && (

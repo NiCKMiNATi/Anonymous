@@ -18,7 +18,7 @@ from datetime import UTC, datetime
 from importlib import resources
 from typing import Any, Protocol
 
-from anonymous.application.context import ContextBuilder
+from anonymous.application.context import BoundedRecentContextBuilder, ContextBuilder, ContextView
 from anonymous.application.ports.model import ModelRequest
 from anonymous.application.ports.persistence import ExecutionStore, HistorySource
 from anonymous.domain.configuration import (
@@ -35,10 +35,13 @@ logger = logging.getLogger("anonymous.configuration")
 REFERENCE_COMMIT = "01e9f46559cfca4c30777b940a8ca7d5f8af25d8"
 GOLDEN_FILE_SHA256 = "afb16c8821f80c5ce4eaf6aee328fb772ee7057e6b62c8d810fdab3e5e2d5bf1"
 WHOLE_HISTORY_ID = "whole-history"
+BOUNDED_RECENT_ID = "bounded-recent-history"
 
 
 class ContextBuilderLike(Protocol):
     def build(self, triggering_message: Message) -> ModelRequest: ...
+
+    def build_view(self, triggering_message: Message, limit_chars: int | None) -> ContextView: ...
 
 
 BuilderFactory = Callable[[HistorySource], ContextBuilderLike]
@@ -59,8 +62,24 @@ def baseline_manifest() -> EffectiveConfiguration:
     )
 
 
+def bounded_recent_manifest() -> EffectiveConfiguration:
+    """``bounded-recent-history@1`` (ADR-0017): a contiguous recent suffix within the runtime's
+    declared character limit. No Slice 0A reference: it is a new configuration, not a baseline."""
+    return EffectiveConfiguration(context=ContextConstruction(BOUNDED_RECENT_ID, 1))
+
+
 def shipped_configurations() -> list[ShippedConfiguration]:
-    return [ShippedConfiguration(baseline_manifest(), ContextBuilder, golden_checked=True)]
+    """``whole-history@1`` stays first and golden-checked (only it may bind legacy conversations);
+    the bounded configuration is executable alongside it."""
+    return [
+        ShippedConfiguration(baseline_manifest(), ContextBuilder, golden_checked=True),
+        ShippedConfiguration(bounded_recent_manifest(), BoundedRecentContextBuilder),
+    ]
+
+
+def default_configuration_digest() -> str:
+    """The configuration new conversations are bound to (ADR-0017). Existing ones keep theirs."""
+    return bounded_recent_manifest().digest
 
 
 # -- golden replay -------------------------------------------------------------------------------
@@ -242,7 +261,9 @@ __all__ = [
     "ConfigurationService",
     "ShippedConfiguration",
     "baseline_manifest",
+    "bounded_recent_manifest",
     "canonical_json",
+    "default_configuration_digest",
     "golden_replay",
     "shipped_configurations",
 ]

@@ -52,6 +52,60 @@ class ComponentIdentity:
         return cls(label=label)
 
 
+SELECTION_MEASURE = "characters"
+
+
+@dataclass(frozen=True, slots=True)
+class ContextSelection:
+    """Which retained messages a bounded context view contained (ADR-0017). Ids and counts only.
+
+    The selection is a contiguous suffix of the history through the run's triggering message, so
+    ``first_message_id`` together with that trigger identifies the exact set; messages are
+    immutable and ordered by position. ``limit_chars`` of ``None`` means the runtime declared no
+    limit. The measure is a character count, a proxy that is not token accounting.
+    """
+
+    first_message_id: str
+    first_position: int
+    selected_count: int
+    omitted_count: int
+    selected_chars: int
+    limit_chars: int | None
+    truncated_included_count: int
+    measure: str = SELECTION_MEASURE
+
+    def __post_init__(self) -> None:
+        if self.selected_count < 1 or self.omitted_count < 0 or self.first_position < 1:
+            raise ValueError("a context selection includes at least the triggering message")
+        if self.measure != SELECTION_MEASURE:
+            raise ValueError("unknown context selection measure")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "first_message_id": self.first_message_id,
+            "first_position": self.first_position,
+            "selected_count": self.selected_count,
+            "omitted_count": self.omitted_count,
+            "selected_chars": self.selected_chars,
+            "limit_chars": self.limit_chars,
+            "measure": self.measure,
+            "truncated_included_count": self.truncated_included_count,
+        }
+
+    @classmethod
+    def from_dict(cls, raw: dict[str, Any]) -> ContextSelection:
+        return cls(
+            first_message_id=str(raw["first_message_id"]),
+            first_position=int(raw["first_position"]),
+            selected_count=int(raw["selected_count"]),
+            omitted_count=int(raw["omitted_count"]),
+            selected_chars=int(raw["selected_chars"]),
+            limit_chars=None if raw["limit_chars"] is None else int(raw["limit_chars"]),
+            truncated_included_count=int(raw["truncated_included_count"]),
+            measure=str(raw["measure"]),
+        )
+
+
 COMPONENTS = (
     "application_build",
     "adapter",
@@ -70,6 +124,9 @@ class ExecutionProvenance:
     runtime_build: ComponentIdentity
     context_configuration: ComponentIdentity
     behavior_configuration: ComponentIdentity
+    # ADR-0017: absent (``None``) for whole-history runs and for every run recorded before it.
+    # ``None`` means unrecorded, never "nothing omitted".
+    context_selection: ContextSelection | None = None
 
     def to_json(self) -> str:
         body: dict[str, Any] = {}
@@ -81,6 +138,8 @@ class ExecutionProvenance:
                 "verification": c.verification.value,
                 "explicit_none": c.explicit_none,
             }
+        if self.context_selection is not None:  # absent key keeps older serialization byte-exact
+            body["context_selection"] = self.context_selection.to_dict()
         return json.dumps(body, sort_keys=True, separators=(",", ":"))
 
     @classmethod
@@ -95,7 +154,11 @@ class ExecutionProvenance:
             )
             for name in COMPONENTS
         }
-        return cls(**parts)
+        selection = raw.get("context_selection")
+        return cls(
+            **parts,
+            context_selection=None if selection is None else ContextSelection.from_dict(selection),
+        )
 
 
 def compare_component(a: ComponentIdentity | None, b: ComponentIdentity | None) -> Comparison:

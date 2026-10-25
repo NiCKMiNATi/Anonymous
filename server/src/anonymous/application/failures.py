@@ -15,6 +15,9 @@ FAILURE_MESSAGES = {
     "context_exceeds_capacity": (
         "The conversation is longer than the model can accept; nothing was sent."
     ),
+    "message_exceeds_capacity": (
+        "This message is longer than the model can accept; nothing was sent."
+    ),
     "dispatch_not_recorded": "The attempt could not be recorded, so nothing was sent.",
     "binding_unavailable": "The model runtime could not be prepared, so nothing was sent.",
     "runtime_busy": "The model runtime was busy for too long, so nothing was sent.",

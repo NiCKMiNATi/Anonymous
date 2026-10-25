@@ -19,6 +19,7 @@ from anonymous.adapters.persistence.sqlite.store import SqliteStore
 from anonymous.application.configuration import (
     ConfigurationCatalog,
     ConfigurationService,
+    default_configuration_digest,
     shipped_configurations,
 )
 from anonymous.application.control import BindingControlRouter
@@ -115,7 +116,9 @@ def build_application(
         schema_version = migrate(db_path)
         store = SqliteStore(db_path, clock or SystemClock())
         owner = store.ensure_dev_owner()
-        chosen_catalog = catalog or ConfigurationCatalog(shipped_configurations())
+        chosen_catalog = catalog or ConfigurationCatalog(
+            shipped_configurations(), default_digest=default_configuration_digest()
+        )
         configuration = ConfigurationService(store, chosen_catalog)
         configuration.startup()
 

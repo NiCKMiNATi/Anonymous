@@ -51,7 +51,12 @@ from anonymous.domain.evidence import (
 )
 from anonymous.domain.ids import RunId
 from anonymous.domain.models import Completeness, ModelRun, RunStatus
-from anonymous.domain.provenance import ComponentIdentity, ExecutionProvenance, Verification
+from anonymous.domain.provenance import (
+    ComponentIdentity,
+    ContextSelection,
+    ExecutionProvenance,
+    Verification,
+)
 
 logger = logging.getLogger("anonymous.worker")
 
@@ -157,19 +162,28 @@ class RunWorker:
                 return self._settle_pending("configuration_unavailable")
             builder = self._catalog.builder(digest, self._history)
             assert builder is not None
-            request = builder.build(self._admitted.user_message)
+            limit = self._runtime.describe().max_input_chars
+            view = builder.build_view(self._admitted.user_message, limit)
+            request = view.request
         except StorageFailure:
             return self._settle_pending("context_unavailable")
-        limit = self._runtime.describe().max_input_chars
+        # The final guard for every configuration (ADR-0017): nothing is ever cut to fit. A bounded
+        # view always contains the triggering message, so only that message alone can exceed it.
         if limit is not None and sum(len(m.content) for m in request.messages) > limit:
-            return self._settle_pending("context_exceeds_capacity")
+            return self._settle_pending(
+                "context_exceeds_capacity" if view.selection is None else "message_exceeds_capacity"
+            )
         prepared = self._runtime.prepare(run.id)
         if isinstance(prepared, PrepareFailed):
             return self._settle_pending("binding_unavailable")
         manifest = self._catalog.manifest(digest)
         assert manifest is not None
         provenance = self._provenance(
-            prepared, manifest.context.id, manifest.context.version, manifest.context_digest
+            prepared,
+            manifest.context.id,
+            manifest.context.version,
+            manifest.context_digest,
+            view.selection,
         )
 
         authorized = self._authorize(
@@ -196,7 +210,12 @@ class RunWorker:
             return self._outcome()
 
     def _provenance(
-        self, prepared: PreparedBinding, context_id: str, context_version: int, context_digest: str
+        self,
+        prepared: PreparedBinding,
+        context_id: str,
+        context_version: int,
+        context_digest: str,
+        selection: ContextSelection | None,
     ) -> ExecutionProvenance:
         return ExecutionProvenance(
             application_build=self._app_build,
@@ -209,6 +228,7 @@ class RunWorker:
                 verification=Verification.VERIFIED,
             ),
             behavior_configuration=ComponentIdentity.none(),
+            context_selection=selection,
         )
 
     # -- T3 --------------------------------------------------------------------------------------

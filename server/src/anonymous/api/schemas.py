@@ -46,6 +46,20 @@ class MessageDto(BaseModel):
     completeness: Literal["complete", "truncated"] | None = None
 
 
+class ContextSelectionDto(BaseModel):
+    """ADR-0017: what the model's input contained, from the run's persisted dispatch provenance.
+    Ids and counts only. ``omitted_count`` earliest messages were not sent but remain saved."""
+
+    first_message_id: str
+    first_position: int
+    selected_count: int
+    omitted_count: int
+    selected_chars: int
+    limit_chars: int | None
+    measure: Literal["characters"]
+    truncated_included_count: int
+
+
 class RunDto(BaseModel):
     id: str
     triggering_message_id: str
@@ -58,6 +72,8 @@ class RunDto(BaseModel):
     retry_of_run_id: str | None = None
     termination_basis: str | None = None
     completion_observed: str | None = None
+    # null = not recorded (whole-history runs, runs that never dispatched, older runs).
+    context: ContextSelectionDto | None = None
 
 
 class RetryRequest(BaseModel):
@@ -112,6 +128,7 @@ def message_dto(m: Message) -> MessageDto:
 
 
 def run_dto(r: ModelRun) -> RunDto:
+    selection = r.provenance.context_selection if r.provenance is not None else None
     return RunDto(
         id=r.id,
         triggering_message_id=r.triggering_message_id,
@@ -124,6 +141,7 @@ def run_dto(r: ModelRun) -> RunDto:
         retry_of_run_id=r.retry_of_run_id,
         termination_basis=r.termination_basis.value if r.termination_basis else None,
         completion_observed=r.completion_observed.value if r.completion_observed else None,
+        context=ContextSelectionDto(**selection.to_dict()) if selection is not None else None,
     )
 
 
