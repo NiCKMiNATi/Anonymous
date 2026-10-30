@@ -93,6 +93,15 @@ valid_port() {
   [ "$1" -ge 1024 ] && [ "$1" -le 65535 ]
 }
 
+# is_owner_only PATH: succeeds only if PATH exists and has no group or other permission bits (read
+# from the entry itself, so a symlink is judged by its own mode and fails). Reads metadata only.
+is_owner_only() {
+  local mode
+  mode=$(/usr/bin/stat -f %Lp "$1" 2>/dev/null) || return 1
+  case $mode in '' | *[!0-7]*) return 1 ;; esac
+  [ $((8#$mode & 8#077)) -eq 0 ]
+}
+
 is_abs_path() {
   case $1 in
     /*) ;;

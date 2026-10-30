@@ -41,6 +41,9 @@ pytestmark = [
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SCRIPTS = ("lib.sh", "start.sh", "status.sh", "stop.sh")
+# The owner's shell is typically umask 022. Every wrapper in these tests is launched under it, so
+# no result depends on the umask of whoever runs the test suite.
+UNDER_UMASK_022 = ["/bin/bash", "-c", 'umask 022; exec "$0" "$@"']
 
 RUNTIME_STUB = textwrap.dedent(
     """\
@@ -88,6 +91,7 @@ APP_SHIM = textwrap.dedent(
       if [ "$prev" = "-m" ] && [ "$arg" = "anonymous" ]; then
         printf '%s\\n' "$@" > "$FAKE_APP_LOG"
         env | grep '^ANONYMOUS_' | sort > "$FAKE_APP_ENV_LOG" || true
+        umask > "$FAKE_APP_UMASK_LOG"
         exit "${{FAKE_APP_EXIT:-0}}"
       fi
       prev=$arg
@@ -158,6 +162,10 @@ class Owner:
         return self.work / "app-env.txt"
 
     @property
+    def app_umask_log(self) -> Path:
+        return self.work / "app-umask.txt"
+
+    @property
     def stub_requests(self) -> Path:
         return self.work / "bin" / "requests.log"
 
@@ -174,7 +182,7 @@ class Owner:
     ) -> subprocess.CompletedProcess[str]:
         env = {**self.env, **(extra or {})}
         return subprocess.run(
-            [str(self.root / "tools" / "owner" / script), *args],
+            [*UNDER_UMASK_022, str(self.root / "tools" / "owner" / script), *args],
             env=env,
             cwd=self.work,
             capture_output=True,
@@ -255,6 +263,7 @@ def owner(tmp_path: Path) -> Iterator[Owner]:
         "ANONYMOUS_OWNER_READY_SECONDS": "5",
         "FAKE_APP_LOG": str(work / "app-args.txt"),
         "FAKE_APP_ENV_LOG": str(work / "app-env.txt"),
+        "FAKE_APP_UMASK_LOG": str(work / "app-umask.txt"),
         "FAKE_APP_EXIT": "0",
     }
     instance = Owner(root, home, work, free_port(), free_port(), env)
@@ -408,6 +417,7 @@ def test_start_launches_verifies_and_runs_the_application_with_the_supported_arg
     out = result.stdout
     assert "identity verified" in out and "Runtime: ready." in out
     assert f"http://127.0.0.1:{owner.app_port}/" in out and "Dataset: anonymous" in out
+    assert "Acceptance smoke: do NOT open it yet" in out and "C0 baseline" in out
     assert "Dataset 'anonymous': new" in out
     assert owner.app_args() == [
         "-I",
@@ -623,6 +633,7 @@ def test_status_of_a_running_runtime_has_no_side_effects_and_no_secrets(owner: O
 def make_dataset(path: Path, statuses: list[str]) -> None:
     """A minimal synthetic stand-in carrying only what the read-only probe reads."""
     path.parent.mkdir(parents=True, exist_ok=True)
+    path.parent.chmod(0o700)
     connection = sqlite3.connect(path)
     connection.execute(
         "CREATE TABLE model_runs (id INTEGER PRIMARY KEY, status TEXT, record_epoch TEXT)"
@@ -632,6 +643,7 @@ def make_dataset(path: Path, statuses: list[str]) -> None:
     )
     connection.commit()
     connection.close()
+    path.chmod(0o600)
 
 
 def test_an_existing_open_dataset_is_opened_and_preserved_byte_for_byte(owner: Owner) -> None:
@@ -669,11 +681,195 @@ def test_a_blocked_dataset_is_refused_untouched_and_a_new_name_is_the_way_out(
 
 def test_an_unreadable_dataset_file_is_not_opened_or_changed(owner: Owner) -> None:
     junk = owner.data / "junk-dev.sqlite3"
-    junk.parent.mkdir(parents=True)
+    junk.parent.mkdir(parents=True, mode=0o700)
     junk.write_bytes(b"this is not a database")
+    junk.chmod(0o600)
     result = owner.run("start.sh", "--dataset", "junk")
     assert result.returncode == 2 and "cannot be read" in result.stderr
     assert junk.read_bytes() == b"this is not a database" and not owner.record.exists()
+
+
+# -- owner-only data: umask, existing files and directories --------------------------------------
+
+
+def modes(root: Path) -> dict[str, int]:
+    return {p.name: p.lstat().st_mode & 0o777 for p in sorted(root.iterdir())}
+
+
+def test_the_application_inherits_umask_077_even_when_the_launching_shell_uses_022(
+    owner: Owner,
+) -> None:
+    result = owner.run("start.sh")  # launched under umask 022 (UNDER_UMASK_022)
+    assert result.returncode == 0, result.stderr
+    assert owner.app_umask_log.read_text().strip() in {"0077", "077"}
+
+
+def test_new_dataset_files_are_0600_and_the_data_directory_is_0700(owner: Owner) -> None:
+    """The real application creates the dataset and its instance-lock file."""
+    import signal
+    import time
+    import urllib.request
+
+    owner.env["ANONYMOUS_OWNER_PYTHON"] = sys.executable
+    process = subprocess.Popen(
+        [*UNDER_UMASK_022, str(owner.root / "tools" / "owner" / "start.sh"), "--dataset", "fresh"],
+        env=owner.env,
+        cwd=owner.work,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        start_new_session=True,
+    )
+    try:
+        deadline = time.monotonic() + 40
+        while time.monotonic() < deadline and process.poll() is None:
+            try:
+                url = f"http://127.0.0.1:{owner.app_port}/api/v1/health"
+                with urllib.request.urlopen(url, timeout=2):
+                    break
+            except OSError:
+                time.sleep(0.3)
+        assert process.poll() is None
+        # The application opens its database per operation, so WAL and SHM files come and go;
+        # whatever exists while it runs, including the lock's journal, must be owner-only.
+        found = modes(owner.data)
+        assert {"fresh-dev.sqlite3", "fresh-dev.sqlite3.instance-lock"} <= set(found), found
+        assert all(mode == 0o600 for mode in found.values()), found
+        assert owner.data.stat().st_mode & 0o777 == 0o700
+        os.killpg(process.pid, signal.SIGINT)
+        process.communicate(timeout=40)
+    finally:
+        if process.poll() is None:
+            os.killpg(process.pid, signal.SIGKILL)  # test-owned group only
+            process.wait()
+    assert all(mode == 0o600 for mode in modes(owner.data).values())
+    owner.run("stop.sh")
+
+
+REFUSED_DATASET_PERMISSIONS = "is accessible to other accounts"
+
+
+def test_an_existing_0644_dataset_is_refused_before_launch_and_left_unchanged(
+    owner: Owner,
+) -> None:
+    dataset = owner.data / "open-dev.sqlite3"
+    make_dataset(dataset, ["succeeded"])
+    dataset.chmod(0o644)
+    before = snapshot(owner.data)
+    before_modes = modes(owner.data)
+    refused = owner.run("start.sh", "--dataset", "open")
+    assert refused.returncode == 2
+    assert REFUSED_DATASET_PERMISSIONS in refused.stderr
+    assert "Anonymous never changes permissions on existing data" in refused.stderr
+    assert "Review and correct them yourself" in refused.stderr
+    assert str(owner.home) not in refused.stderr + refused.stdout
+    assert not owner.record.exists() and not (owner.home / "runtime").exists()
+    assert not owner.app_log.exists() and not owner.stub_requests.exists()
+    assert snapshot(owner.data) == before and modes(owner.data) == before_modes  # not even chmod
+
+
+@pytest.mark.parametrize("suffix", ["-wal", "-shm", "-journal", ".instance-lock"])
+@pytest.mark.parametrize("mode", [0o644, 0o640, 0o604, 0o666])
+def test_an_open_sidecar_of_an_otherwise_private_dataset_is_refused(
+    owner: Owner, suffix: str, mode: int
+) -> None:
+    dataset = owner.data / "side-dev.sqlite3"
+    make_dataset(dataset, ["succeeded"])
+    sidecar = owner.data / f"side-dev.sqlite3{suffix}"
+    sidecar.write_bytes(b"")
+    sidecar.chmod(mode)
+    before = snapshot(owner.data)
+    refused = owner.run("start.sh", "--dataset", "side")
+    assert refused.returncode == 2 and REFUSED_DATASET_PERMISSIONS in refused.stderr
+    assert not owner.record.exists() and not owner.app_log.exists()
+    assert snapshot(owner.data) == before and sidecar.stat().st_mode & 0o777 == mode
+
+
+@pytest.mark.parametrize("mode", [0o755, 0o750, 0o770, 0o701])
+def test_a_group_or_other_accessible_data_directory_is_refused_before_launch(
+    owner: Owner, mode: int
+) -> None:
+    dataset = owner.data / "dir-dev.sqlite3"
+    make_dataset(dataset, ["succeeded"])
+    owner.data.chmod(mode)
+    before = snapshot(owner.data)
+    for name in ("dir", "another-new-name"):  # an existing dataset and a new one alike
+        refused = owner.run("start.sh", "--dataset", name)
+        assert refused.returncode == 2, refused.stderr
+        assert "owner data directory is accessible to other accounts" in refused.stderr
+        assert (
+            "Nothing was started" in refused.stderr
+        )  # refused before the runtime, not rolled back
+        assert not owner.record.exists() and not owner.app_log.exists()
+        assert not (owner.home / "runtime").exists() and not owner.stub_requests.exists()
+    assert snapshot(owner.data) == before and owner.data.stat().st_mode & 0o777 == mode
+
+
+def test_an_existing_private_dataset_and_sidecars_remain_usable_and_unchanged(
+    owner: Owner,
+) -> None:
+    dataset = owner.data / "safe-dev.sqlite3"
+    make_dataset(dataset, ["succeeded", "failed"])
+    lock = owner.data / "safe-dev.sqlite3.instance-lock"
+    lock.write_bytes(b"")
+    lock.chmod(0o600)
+    before = snapshot(owner.data)
+    result = owner.run("start.sh", "--dataset", "safe")
+    assert result.returncode == 0, result.stderr
+    assert "Dataset 'safe': existing, open (runs=2 indeterminate=0 unsettled=0)" in result.stdout
+    assert snapshot(owner.data) == before
+    assert modes(owner.data) == {"safe-dev.sqlite3": 0o600, "safe-dev.sqlite3.instance-lock": 0o600}
+    assert owner.data.stat().st_mode & 0o777 == 0o700
+
+
+@pytest.mark.parametrize(
+    ("umask", "main_mode", "expected"),
+    [(0o077, None, 0o600), (0o022, 0o600, 0o600), (0o022, 0o644, 0o644)],
+)
+def test_sqlite_gives_wal_and_shm_the_main_files_mode_so_umask_cannot_repair_old_datasets(
+    tmp_path: Path, umask: int, main_mode: int | None, expected: int
+) -> None:
+    """The premise of the start-up check, on a disposable synthetic file."""
+    path = tmp_path / "probe.sqlite3"
+    if main_mode is not None:
+        path.touch(mode=main_mode)
+        path.chmod(main_mode)
+    code = (
+        "import os, sqlite3, sys\n"
+        f"os.umask({umask})\n"
+        "c = sqlite3.connect(sys.argv[1])\n"
+        "c.execute('PRAGMA journal_mode=WAL')\n"
+        "c.execute('CREATE TABLE IF NOT EXISTS t (x)')\n"
+        "c.execute('INSERT INTO t VALUES (1)')\n"
+        "c.commit()\n"
+        "print(*(oct(os.stat(sys.argv[1] + s).st_mode & 0o777) for s in ('', '-wal', '-shm')))\n"
+    )
+    out = subprocess.run(
+        [sys.executable, "-I", "-c", code, str(path)], capture_output=True, text=True, check=True
+    ).stdout.split()
+    assert out == [oct(expected)] * 3
+
+
+def test_the_runbook_requires_the_c0_baseline_before_any_browser_interaction() -> None:
+    text = (REPO_ROOT / "docs" / "operations" / "v0-1-owner-runbook.md").read_text()
+    start = text.index("### Acceptance-smoke procedure")
+    section = text[start : text.index("\n## ", start)]
+    steps = [
+        "Start Anonymous with the wrapper",
+        "Do **NOT** open the browser",
+        "record **C0**",
+        "zero conversations, zero messages, zero runs and zero submissions",
+        "Only after C0 PASS",
+        "create exactly one empty conversation",
+        "**C1**",
+        "Only after C1 PASS",
+        "submit M1",
+    ]
+    positions = [section.index(step) for step in steps]
+    assert positions == sorted(positions), "the acceptance sequence is out of order"
+    assert "not the procedure for normal use" in section or "normal use" in section
+    # The normal start instructions point acceptance runs at the stricter procedure.
+    assert "Acceptance-smoke procedure" in text[: text.index("### Acceptance-smoke procedure")]
 
 
 def test_the_dataset_probe_module_loads_and_checks_its_usage(
@@ -760,7 +956,7 @@ def test_the_real_application_starts_on_the_supported_arguments_and_ctrl_c_ends_
 
     owner.env["ANONYMOUS_OWNER_PYTHON"] = sys.executable  # the real server environment
     process = subprocess.Popen(
-        [str(owner.root / "tools" / "owner" / "start.sh"), "--dataset", "real"],
+        [*UNDER_UMASK_022, str(owner.root / "tools" / "owner" / "start.sh"), "--dataset", "real"],
         env=owner.env,
         cwd=owner.work,
         stdout=subprocess.PIPE,

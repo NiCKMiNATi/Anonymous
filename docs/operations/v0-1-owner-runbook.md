@@ -21,6 +21,8 @@ The wrappers never download or install anything. You provide:
 
 Everything the wrappers keep lives under `~/Library/Application Support/AnonymousDev/` (override with `ANONYMOUS_OWNER_HOME`): `runtime/` (private: launch record, per-launch key, the runtime's own log) and `data/` (your `*-dev.sqlite3` datasets). Nothing machine-specific is stored in the repository.
 
+**Owner-only data.** `start.sh` sets `umask 077` before it creates anything, and the application and runtime inherit it, so a *newly created* data directory is `0700` and a new dataset, its `-wal`/`-shm` files and its `.instance-lock` file are `0600`, whatever umask your shell has. It cannot repair data that already exists, and it never changes permissions itself: if the data directory or any existing file of the chosen dataset (database, `-wal`, `-shm`, `-journal`, `.instance-lock`) has a group or other permission bit, `start.sh` refuses (exit 2) before the dataset is opened and before any runtime is launched. Review and correct such permissions yourself (for example `chmod 700` on the data directory and `chmod 600` on the files), then start again. The check reads modes only.
+
 ## 2. Start, check, stop
 
 From the repository root:
@@ -34,7 +36,7 @@ tools/owner/stop.sh                       # ends the runtime (after the applicat
 
 **What `start.sh` does, in order:** checks the prerequisites and AC power; checks the dataset name and reads its run state **read-only**; refuses a blocked dataset; refuses if port 8000 is occupied; reuses an already running runtime only if it was launched and hash-verified against today's pins, otherwise launches the pinned runtime through the existing launcher (`llama_ctl launch --hash`, sandboxed, loopback, per-launch key) after cleaning only a *stale* launch record; verifies the process identity, the sole listener and both digests; waits for the runtime's readiness; then runs the application **in the foreground**. If anything fails after this invocation launched the runtime, that runtime is stopped again through the identity-verified stop.
 
-When it prints the address, open **http://127.0.0.1:8000/** in a browser. The terminal then belongs to the application.
+When it prints the address, open **http://127.0.0.1:8000/** in a browser for normal use. The terminal then belongs to the application. **For an acceptance smoke, do not open the browser yet: follow the [Acceptance-smoke procedure](#acceptance-smoke-procedure) below.**
 
 **Stopping, in this order:**
 
@@ -43,6 +45,19 @@ When it prints the address, open **http://127.0.0.1:8000/** in a browser. The te
 3. Run `tools/owner/stop.sh`. It refuses while anything still listens on port 8000, because it cannot show that no reply is in flight; otherwise it sends one SIGTERM to the recorded runtime after re-verifying its identity, never escalates, and removes the launch files once the process is confirmed gone.
 
 `stop.sh` never signals the application: the application has no identity record, so ending it stays your Ctrl-C. Optional environment: `ANONYMOUS_OWNER_HOME`, `ANONYMOUS_OWNER_CONFIG`. (Other `ANONYMOUS_OWNER_*` variables are test seams, not for normal use. A stray `ANONYMOUS_*` application setting is ignored and reported; the wrapper passes the supported settings itself.)
+
+### Acceptance-smoke procedure
+
+This is **not the procedure for normal use**; it is the stricter sequence for the P0-2 real-model acceptance smoke, whose protocol (checkpoints C0, C1, the synthetic prompts M1 to M3 and the acceptance criteria) is kept by the owner outside this repository and is not changed here. The web interface offers **New conversation** as the first thing to click on an empty dataset, so opening it early can create a conversation before the baseline is taken. Follow the steps in this order:
+
+1. Start Anonymous with the wrapper, on a **fresh dataset name** (`tools/owner/start.sh --dataset NAME`), and leave that terminal running.
+2. Do **NOT** open the browser. Open no tab on `127.0.0.1:8000` and close any that is already open there; use a second terminal only. `tools/owner/status.sh` may be used at any time (it only reads).
+3. In the second terminal, record **C0**, the read-only baseline checkpoint of the protocol: the dataset exists and contains zero conversations, zero messages, zero runs and zero submissions, and the runtime is identity-verified and has served no completion. `status.sh` alone is not enough, because it reports run counts only.
+4. Only after C0 PASS, open the browser and create exactly one empty conversation (**New conversation**); send nothing.
+5. Record **C1**, the binding verification: exactly one conversation, bound to the bounded-recent-history configuration, still with zero messages, runs and submissions.
+6. Only after C1 PASS, submit M1 (and later M2 and M3) as the protocol directs.
+
+If C0 shows anything other than an empty dataset, stop: the result is a deviation to be reported, not a baseline. The application does not log requests (request paths carry object ids), so the origin of an unexpected conversation cannot be established afterwards; the C0 gate is the control.
 
 ## 3. While it runs
 
@@ -83,6 +98,7 @@ All wrapper messages state a fixed reason and no path, key or message content. R
 | *recovery file* / `unresolved_launch_intent` / `runtime_may_survive_unrecorded` / `spawn_status_unknown` | An earlier launch was interrupted and a runtime may exist without a record. **Do not launch again.** Follow the [intent recovery procedure](../implementation/v0-1-external-runtime-dev.md#recovery-from-a-retained-launch-intent-launch_intent_without_record-unresolved_launch_intent-spawn_status_unknown-runtime_may_survive_unrecorded): locate the process by the nonce the launcher printed, verify identity, and only then terminate it and delete the retained files. |
 | *did not report ready* | The runtime started but did not answer `GET /health` in 60 seconds; start rolled it back. Check the runtime's own log in `runtime/` (it contains local paths; do not share it). |
 | *still running after SIGTERM* (stop, exit 4) | The runtime ignored the signal. It is not escalated. Wait, rerun `stop.sh`; killing it is your decision. |
+| *…is accessible to other accounts (group or other permission bits are set)* | The data directory, or an existing file of the dataset you named, is not owner-only. Nothing was started and nothing was opened or changed. Review the permissions yourself and make them owner-only (section 1, 'Owner-only data'), or choose a new dataset name. |
 | Application exits at start with *Refusing to start* | The configuration check failed before anything was opened; the wrapper rolled back a runtime it launched. |
 
 ## 7. Confirming a clean shutdown

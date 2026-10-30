@@ -16,6 +16,11 @@
 set -u -o pipefail
 . "$(dirname "$0")/lib.sh"
 
+# Everything this invocation creates (directories, the dataset and its WAL, SHM and lock files, the
+# runtime's files) is owner-only, whatever umask the launching shell had. The application and the
+# runtime inherit it. It cannot tighten files that already exist; those are checked below.
+umask 077
+
 usage() {
   cat <<'EOF'
 Usage: tools/owner/start.sh [--dataset NAME] [--allow-battery] [--allow-blocked]
@@ -119,6 +124,21 @@ except RuntimeConfigurationError as error:
     sys.exit(1)
 ' "$DB" || exit 2
 
+# Existing owner data must already be private. SQLite gives a new WAL or SHM file the mode of the
+# main database file, so the umask above cannot repair an older, more open dataset. This only
+# reads modes: it never changes, opens, deletes or rewrites anything, and runs before the dataset
+# is probed and before any runtime is launched.
+if [ -e "$DATA_DIR" ] || [ -L "$DATA_DIR" ]; then
+  is_owner_only "$DATA_DIR" ||
+    die 2 "the owner data directory is accessible to other accounts (group or other permission bits are set). Anonymous never changes permissions on existing data. Review and correct them yourself (the data directory should be owner-only), then start again. Nothing was started."
+fi
+for dataset_file in "$DB" "$DB-wal" "$DB-shm" "$DB-journal" "$DB.instance-lock"; do
+  if [ -e "$dataset_file" ] || [ -L "$dataset_file" ]; then
+    is_owner_only "$dataset_file" ||
+      die 2 "an existing file of dataset '$DATASET' (database, WAL, SHM, journal or instance lock) is accessible to other accounts (group or other permission bits are set). Anonymous never changes permissions on existing data and did not open it. Review and correct them yourself (these files should be owner-only), then start again. Nothing was started."
+  fi
+done
+
 state_line=$(dataset_state "$DB")
 state=${state_line%% *}
 case $state in
@@ -194,7 +214,7 @@ fi
 if [ "$REUSE" -eq 0 ]; then
   [ "$(port_state "$LLAMA_PORT")" = free ] ||
     die 3 "port $LLAMA_PORT is occupied or could not be inspected. Nothing was started or signalled."
-  (umask 077 && mkdir -p "$RUNTIME_DIR") || die 2 "the runtime directory could not be created."
+  mkdir -p "$RUNTIME_DIR" || die 2 "the runtime directory could not be created."
   say "Launching the pinned runtime. Both artifacts are hashed against the pins first (this reads about 2.5 GB)..."
   rc=0
   out=$(ctl launch --runtime-bin "$RUNTIME_BIN" --model "$MODEL_PATH" --port "$LLAMA_PORT" \
@@ -247,7 +267,9 @@ say "Runtime: ready."
 
 # -- 4. the application, in the foreground -----------------------------------------------------------
 
-(umask 077 && mkdir -p "$DATA_DIR") || die 2 "the data directory could not be created."
+mkdir -p "$DATA_DIR" || die 2 "the data directory could not be created."
+is_owner_only "$DATA_DIR" ||
+  die 2 "the owner data directory is accessible to other accounts after creation; the application was not started."
 
 UNSET_ARGS=''
 for name in $APP_ENV_NAMES; do UNSET_ARGS="$UNSET_ARGS -u $name"; done
@@ -255,7 +277,9 @@ CAFFEINATE=''
 [ -x /usr/bin/caffeinate ] && CAFFEINATE='/usr/bin/caffeinate -i'
 
 say ""
-say "Open http://$LOOPBACK:$APP_PORT/ in your browser. Dataset: $DATASET. Synthetic data only; no authentication."
+say "Anonymous is starting at http://$LOOPBACK:$APP_PORT/ . Dataset: $DATASET. Synthetic data only; no authentication."
+say "Normal use: open that address in your browser once the application is listening."
+say "Acceptance smoke: do NOT open it yet. Record the C0 baseline first (runbook, 'Acceptance-smoke procedure')."
 say "When no reply is being generated, press Ctrl-C here to stop Anonymous (the runtime stays up; tools/owner/stop.sh ends it)."
 say ""
 
